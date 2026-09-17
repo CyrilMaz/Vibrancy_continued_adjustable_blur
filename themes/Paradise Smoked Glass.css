@@ -1,0 +1,224 @@
+/* Variables */
+:root {
+    --corner: 6px;
+    --border: 5px;
+    --vscode-sash-size: var(--border);
+    --shadow-color: 0deg 0% 6%;
+    --shadow-elevation:
+        0.3px 0.5px 0.7px hsl(var(--shadow-color) / 0.38), 0.4px 0.9px 1.1px -1.2px hsl(var(--shadow-color) / 0.38),
+        1px 2.1px 2.6px -2.5px hsl(var(--shadow-color) / 0.38);
+    --shadow-inverted:
+        0.3px -0.6px 0.8px hsl(var(--shadow-color) / 0.41), 0.5px -1.1px 1.4px -1.2px hsl(var(--shadow-color) / 0.41),
+        1.4px -2.9px 3.6px -2.5px hsl(var(--shadow-color) / 0.41);
+    --semi-opaque-dark: rgba(5, 5, 5, 0.7);
+    --semi-opaque-dark-secondary: rgba(5, 5, 5, 0.9);
+    --semi-opaque-dark-tertiary: rgba(5, 5, 5, 0.4);
+    --semi-opaque-light: rgba(255, 255, 255, 0.5);
+    --semi-opaque-light-secondary: rgba(255, 255, 255, 0.8);
+    --semi-opaque-light-tertiary: rgba(255, 255, 255, 0.3);
+    --semi-opaque: var(--semi-opaque-dark);
+    --semi-opaque-secondary: var(--semi-opaque-dark-secondary);
+    --semi-opaque-tertiary: var(--semi-opaque-dark-tertiary);
+    --semi-opaque-text: var(--semi-opaque-light);
+    --semi-opaque-text-secondary: var(--semi-opaque-light-secondary);
+    --semi-opaque-text-tertiary: var(--semi-opaque-light-tertiary);
+    --primary-bg: #1e1e1e;
+    --secondary-bg: #111111;
+    --editor-bg: #141414cc;
+
+    --selectable-transition: background-color 0.15s ease-out, color 0.15s ease-out;
+}
+
+.monaco-workbench .part.editor .editor-group-container > .tabs *,
+.monaco-workbench .monaco-action-bar *,
+.monaco-workbench .part.statusbar * {
+    transition: var(--selectable-transition);
+}
+
+/* Transparent Background */
+.monaco-workbench,
+.monaco-workbench .sidebar,
+.monaco-workbench .auxiliarybar,
+.monaco-workbench .activitybar,
+.monaco-workbench .titlebar,
+.monaco-workbench .monaco-list-rows,
+.monaco-workbench .part.sidebar > .title,
+.monaco-workbench .part.auxiliarybar > .title,
+.monaco-workbench .monaco-inputbox,
+.monaco-workbench .part > .title > .title-actions .start-debug-action-item,
+.monaco-workbench .pane-header,
+.monaco-workbench .part.panel.bottom,
+.monaco-workbench .part.panel.bottom > .composite.title,
+.monaco-workbench #terminal,
+body {
+    background: transparent !important;
+}
+
+.notebookOverlay.notebook-editor,
+.cell-statusbar-container,
+.margin-view-overlays,
+.monaco-list-row:hover:not(.selected):not(.focused) {
+    background-color: transparent !important;
+}
+
+.monaco-workbench .part.editor {
+    background: var(--editor-bg) !important;
+}
+
+.monaco-workbench .part.editor .content,
+.monaco-workbench .part.editor .editor-container,
+.monaco-workbench .part.editor .monaco-editor,
+.monaco-workbench .part.editor .monaco-editor-background,
+.monaco-workbench .part.editor .editor-group-container > .tabs,
+.monaco-workbench .part.editor .editor-group-container > .tabs .tab.active,
+.monaco-workbench .part.editor .editor-group-container > .tabs .tab.selected {
+    background: transparent !important;
+}
+
+.monaco-workbench .part.editor .editor-group-container > .tabs .tab {
+    background: var(--semi-opaque-tertiary) !important;
+}
+
+.monaco-workbench .part.editor .editor-group-container > .tabs .tab:not(.active):not(.selected):hover {
+    background: var(--semi-opaque) !important;
+}
+
+.monaco-workbench
+    .part.editor
+    .editor-group-container
+    > .title
+    .tabs-container
+    .tab-label
+    > .monaco-icon-label-container::after {
+    background: transparent !important;
+}
+
+.monaco-workbench .part.editor .editor-widget,
+.monaco-workbench .simple-find-part {
+    background: var(--semi-opaque-tertiary) !important;
+    border: none !important;
+    backdrop-filter: blur(10px) !important;
+    .monaco-inputbox {
+        background: var(--editor-bg) !important;
+    }
+}
+
+.monaco-workbench .part.editor .scroll-decoration {
+    box-shadow: none !important;
+}
+
+.monaco-workbench .part > .title > .title-actions .start-debug-action-item {
+    border-color: transparent !important;
+}
+
+.monaco-workbench .part.panel.bottom .composite.title {
+    border-top-color: transparent !important;
+}
+
+.monaco-workbench .monaco-scrollable-element .monaco-tree-sticky-container,
+.monaco-workbench .monaco-scrollable-element .monaco-tree-sticky-container .monaco-tree-sticky-row {
+    background-color: var(--primary-bg) !important;
+}
+
+.monaco-editor .sticky-line-content {
+    background-color: var(--primary-bg) !important;
+}
+
+.monaco-workbench
+    .activitybar
+    > .content
+    :not(.monaco-menu)
+    > .monaco-action-bar
+    li:not(.checked)
+    > .action-label.codicon,
+.monaco-workbench
+    .part.panel.bottom
+    .composite.title
+    .composite-bar
+    .actions-container
+    > .action-item:not(.checked)
+    > .action-label,
+.monaco-workbench .part.auxiliarybar > .title .monaco-action-bar li.action-item:not(.checked) > .action-label {
+    color: var(--semi-opaque-light) !important;
+}
+
+.monaco-workbench
+    .activitybar
+    > .content
+    :not(.monaco-menu)
+    > .monaco-action-bar
+    li:not(.checked)
+    > .action-label:not(.codicon) {
+    background-color: var(--semi-opaque-light) !important;
+}
+
+.monaco-workbench .monaco-inputbox {
+    border: var(--semi-opaque-light) solid 1px !important;
+}
+
+.monaco-workbench .part.panel.bottom > .content {
+    background-color: var(--semi-opaque-dark) !important;
+}
+
+/* Box Shadow */
+.monaco-workbench .part.editor,
+.monaco-workbench .part.panel.bottom > .content,
+.context-view.monaco-menu-container {
+    box-shadow: var(--shadow-elevation) !important;
+}
+
+.monaco-workbench .part.panel.bottom > .content,
+.monaco-workbench .part.statusbar {
+    box-shadow: var(--shadow-inverted) !important;
+}
+
+/* Rounded Corners */
+.monaco-workbench .part.editor,
+.monaco-workbench .panel,
+.monaco-list .monaco-list-row,
+.monaco-workbench .sidebar,
+.monaco-workbench .monaco-inputbox,
+.monaco-workbench .monaco-tree-type-filter,
+.monaco-workbench .part.editor .editor-widget,
+.monaco-workbench .simple-find-part,
+.monaco-workbench .part.panel.bottom > .content,
+.statusbar-item-label {
+    border-radius: var(--corner) !important;
+}
+
+.monaco-workbench .part.statusbar,
+#status\.host,
+#status\.host > .statusbar-item-label,
+.monaco-sash.vertical:before,
+.monaco-sash.horizontal:before,
+.monaco-scrollable-element > .scrollbar > .slider,
+.monaco-scrollable-element > canvas.decorationsOverviewRuler,
+.xterm .xterm-scrollable-element > .scrollbar > .slider {
+    border-radius: 100px !important;
+}
+
+.label-container .label {
+  color: white !important;
+}
+
+/*
+ * VSCode 1.133+ experimental "Modern UI" (workbench.experimental.modernUI) renders the
+ * sidebar, panel and auxiliary bar as floating cards and repaints them and the shell
+ * backdrop with higher-specificity !important backgrounds (floatingPanels.css), turning
+ * the workbench opaque (#269, #270, #271). Re-assert this theme's backgrounds at the
+ * same specificity; this stylesheet is injected after VSCode's, so it wins the tie.
+ */
+.monaco-workbench.floating-panels,
+.monaco-workbench.floating-panels > .monaco-grid-view,
+.monaco-workbench.floating-panels .part.sidebar,
+.monaco-workbench.floating-panels .part.auxiliarybar,
+.monaco-workbench.floating-panels .part.panel {
+  background: transparent !important;
+}
+
+/* Modern UI's companion "style overrides" (.style-override, same experiment) also
+   repaint every pane and pane header with an !important sideBar-background. */
+.monaco-workbench.style-override .monaco-pane-view .pane,
+.monaco-workbench.style-override .monaco-pane-view .pane > .pane-header {
+  background: transparent !important;
+}

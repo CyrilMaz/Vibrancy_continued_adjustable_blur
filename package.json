@@ -1,0 +1,307 @@
+{
+  "name": "vscode-vibrancy-continued",
+  "displayName": "Vibrancy Continued",
+  "description": "Vibrancy Effect for Visual Studio Code",
+  "version": "1.1.93",
+  "publisher": "illixion",
+  "author": {
+    "email": "illixion@illixion.com",
+    "name": "illixion",
+    "url": "https://illixion.com"
+  },
+  "engines": {
+    "vscode": "^1.63.0"
+  },
+  "categories": [
+    "Other",
+    "Themes"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/illixion/vscode-vibrancy-continued"
+  },
+  "bugs": {
+    "url": "https://github.com/illixion/vscode-vibrancy-continued/issues"
+  },
+  "sponsor": {
+    "url": "https://github.com/sponsors/illixion"
+  },
+  "qna": "https://github.com/illixion/vscode-vibrancy-continued/discussions/categories/q-a",
+  "preview": false,
+  "icon": "images/logo.png",
+  "extensionKind": [
+    "ui"
+  ],
+  "galleryBanner": {
+    "color": "#42BFF5"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension/index.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "extension.installVibrancy",
+        "title": "%extension.installVibrancy.title%"
+      },
+      {
+        "command": "extension.uninstallVibrancy",
+        "title": "%extension.uninstallVibrancy.title%"
+      },
+      {
+        "command": "extension.updateVibrancy",
+        "title": "%extension.updateVibrancy.title%"
+      }
+    ],
+    "configuration": {
+      "title": "Vibrancy Effect",
+      "properties": {
+        "vscode_vibrancy.type": {
+          "description": "%configuration.type.description%",
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "acrylic",
+            "mica",
+            "tabbed",
+            "transparent",
+            "under-window",
+            "fullscreen-ui",
+            "titlebar",
+            "selection",
+            "menu",
+            "popover",
+            "sidebar",
+            "content",
+            "header",
+            "hud",
+            "sheet",
+            "tooltip",
+            "under-page",
+            "window",
+            "appearance-based",
+            "dark",
+            "ultra-dark",
+            "light",
+            "medium-light"
+          ],
+          "enumDescriptions": [
+            "%configuration.type.auto.description%",
+            "%configuration.type.acrylic.description%",
+            "%configuration.type.mica.description%",
+            "%configuration.type.tabbed.description%",
+            "%configuration.type.transparent.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only.description%",
+            "%configuration.type.macos-only-legacy.description%",
+            "%configuration.type.macos-only-legacy.description%",
+            "%configuration.type.macos-only-legacy.description%",
+            "%configuration.type.macos-only-legacy.description%",
+            "%configuration.type.macos-only-legacy.description%"
+          ]
+        },
+        "vscode_vibrancy.opacity": {
+          "description": "%configuration.opacity.description%",
+          "type": "number",
+          "default": -1,
+          "minimum": -1,
+          "maximum": 1
+        },
+        "vscode_vibrancy.backgroundOverride": {
+          "description": "%configuration.backgroundOverride.description%",
+          "type": "string",
+          "format": "color",
+          "default": ""
+        },
+        "vscode_vibrancy.theme": {
+          "description": "%configuration.theme.description%",
+          "type": "string",
+          "default": "Default Dark",
+          "enum": [
+            "Default Dark",
+            "Dark (Only Subbar)",
+            "Default Light",
+            "Light (Only Subbar)",
+            "Tokyo Night Storm",
+            "Tokyo Night Storm (Outer)",
+            "Noir et blanc",
+            "Dark (Exclude Tab Line)",
+            "Solarized Dark+",
+            "Catppuccin Mocha",
+            "GitHub Dark Default",
+            "Paradise Smoked Glass",
+            "Paradise Frosted Glass",
+            "Atom One Dark",
+            "Custom theme (use imports)"
+          ]
+        },
+        "vscode_vibrancy.enableAutoTheme": {
+          "description": "%configuration.enableAutoTheme.description%",
+          "type": "boolean",
+          "default": false
+        },
+        "vscode_vibrancy.preferredDarkTheme": {
+          "type": "string",
+          "default": "Default Dark",
+          "enum": [
+            "Default Dark",
+            "Dark (Only Subbar)",
+            "Default Light",
+            "Light (Only Subbar)",
+            "Tokyo Night Storm",
+            "Tokyo Night Storm (Outer)",
+            "Noir et blanc",
+            "Dark (Exclude Tab Line)",
+            "Solarized Dark+",
+            "Catppuccin Mocha",
+            "GitHub Dark Default",
+            "Paradise Smoked Glass",
+            "Paradise Frosted Glass",
+            "Atom One Dark",
+            "Custom theme (use imports)"
+          ]
+        },
+        "vscode_vibrancy.preferredLightTheme": {
+          "type": "string",
+          "default": "Default Light",
+          "enum": [
+            "Default Light",
+            "Dark (Only Subbar)",
+            "Default Dark",
+            "Light (Only Subbar)",
+            "Tokyo Night Storm",
+            "Tokyo Night Storm (Outer)",
+            "Noir et blanc",
+            "Dark (Exclude Tab Line)",
+            "Solarized Dark+",
+            "Catppuccin Mocha",
+            "GitHub Dark Default",
+            "Paradise Smoked Glass",
+            "Paradise Frosted Glass",
+            "Atom One Dark",
+            "Custom theme (use imports)"
+          ]
+        },
+        "vscode_vibrancy.preferedDarkTheme": {
+          "type": "string",
+          "default": "Default Dark",
+          "deprecationMessage": "%configuration.preferedDarkTheme.deprecation%",
+          "markdownDeprecationMessage": "%configuration.preferedDarkTheme.deprecation%"
+        },
+        "vscode_vibrancy.preferedLightTheme": {
+          "type": "string",
+          "default": "Default Light",
+          "deprecationMessage": "%configuration.preferedLightTheme.deprecation%",
+          "markdownDeprecationMessage": "%configuration.preferedLightTheme.deprecation%"
+        },
+        "vscode_vibrancy.imports": {
+          "description": "%configuration.imports.description%",
+          "type": "array",
+          "default": [
+            "/path/to/file"
+          ]
+        },
+        "vscode_vibrancy.refreshInterval": {
+          "description": "%configuration.refreshInterval.description%",
+          "type": "number",
+          "default": 10
+        },
+        "vscode_vibrancy.preventFlash": {
+          "description": "%configuration.preventFlash.description%",
+          "type": "boolean",
+          "default": true
+        },
+        "vscode_vibrancy.windowMode": {
+          "description": "%configuration.windowMode.description%",
+          "type": "string",
+          "enum": [
+            "auto",
+            "framed",
+            "frameless",
+            "frameless-transparent"
+          ],
+          "enumDescriptions": [
+            "%configuration.windowMode.auto%",
+            "%configuration.windowMode.framed%",
+            "%configuration.windowMode.frameless%",
+            "%configuration.windowMode.framelessTransparent%"
+          ],
+          "default": "auto"
+        },
+        "vscode_vibrancy.windowControlsStyle": {
+          "description": "%configuration.windowControlsStyle.description%",
+          "type": "string",
+          "enum": [
+            "auto",
+            "custom",
+            "hidden",
+            "native"
+          ],
+          "enumDescriptions": [
+            "%configuration.windowControlsStyle.auto%",
+            "%configuration.windowControlsStyle.custom%",
+            "%configuration.windowControlsStyle.hidden%",
+            "%configuration.windowControlsStyle.native%"
+          ],
+          "default": "auto"
+        },
+        "vscode_vibrancy.forceFramelessWindow": {
+          "description": "%configuration.forceFramelessWindow.description%",
+          "type": "boolean",
+          "default": false,
+          "deprecationMessage": "%configuration.forceFramelessWindow.deprecation%",
+          "markdownDeprecationMessage": "%configuration.forceFramelessWindow.deprecation%"
+        },
+        "vscode_vibrancy.disableFramelessWindow": {
+          "description": "%configuration.disableFramelessWindow.description%",
+          "type": "boolean",
+          "default": false,
+          "deprecationMessage": "%configuration.disableFramelessWindow.deprecation%",
+          "markdownDeprecationMessage": "%configuration.disableFramelessWindow.deprecation%"
+        },
+        "vscode_vibrancy.disableThemeFixes": {
+          "description": "%configuration.disableThemeFixes.description%",
+          "type": "boolean",
+          "default": false
+        },
+        "vscode_vibrancy.disableColorCustomizations": {
+          "description": "%configuration.disableColorCustomizations.description%",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build-win10": "node-gyp rebuild",
+    "vscode:uninstall": "node ./extension/uninstallHook.js",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "test:e2e": "node test/e2e/run-e2e.js",
+    "bump": "npm version --no-git-tag-version --no-commit"
+  },
+  "dependencies": {
+    "fs-extra": "^10.1.0",
+    "jsonc-parser": "^3.3.1",
+    "mz": "^2.7.0"
+  },
+  "devDependencies": {
+    "node-addon-api": "^5.0.0",
+    "vitest": "^4.1.2"
+  }
+}

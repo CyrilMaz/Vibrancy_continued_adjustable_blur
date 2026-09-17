@@ -1,0 +1,1770 @@
+var vscode = require('vscode');
+var fs = require('mz/fs');
+var path = require('path');
+var os = require('os');
+var { spawn } = require('child_process');
+var {
+  generateNewJS: _generateNewJS,
+  removeJSMarkers,
+  resolveEffectiveWindowMode,
+  resolveWindowMode,
+  resolveWindowControlsStyle,
+  injectElectronOptions,
+  removeElectronOptions,
+  patchCSP: _patchCSP,
+  removeCSPPatch,
+  deepEqual,
+  checkRuntimeUpdate,
+  getConfigDir,
+  resolveManagedBgKeys,
+} = require('./file-transforms');
+const { applySettings, restoreSettings } = require('./vscode-settings');
+const { toggleTitleBarForRestartPrompt, healStrandedTitleBarToggle } = require('./mac-restart-toggle');
+const {
+  deriveProfileIdentity,
+  evaluateUninstallOwnership,
+  isOwnershipTakeover,
+} = require('./profile-ownership');
+const {
+  listProfiles,
+  groupBySettingsFile,
+  findProfileByGlobalStorage,
+  profileHasExtension,
+} = require('./profile-registry');
+const { findVibrancyLeftovers, assessProfileSituation } = require('./profile-tips');
+const { readColorCustomizations } = require('./jsonc-settings');
+const { resolveInstallPaths, rebaseInstallPaths } = require('./install-paths');
+
+/**
+ * @type {(info: string) => string}
+ */
+const localize = require('./i18n');
+
+/**
+ * @type {'unknown' | 'win10' | 'macos'}
+ */
+const osType = require('./platform');
+
+// Windows 11 is build 22000+. os.release() reports e.g. "10.0.22631" on Win11
+// and "10.0.19045" on Win10 — both have major 10, so we must check the build.
+// Used to pick the modern DWM backdrop path (Mica/Acrylic, no drag lag) on
+// Win11 vs the legacy SetWindowCompositionAttribute accent on Win10.
+const isWindows11 = osType === 'win10'
+  && Number(require('os').release().split('.')[2]) >= 22000;
+
+// VSCode version [major, minor] from which an opaque (Aero-Snap-capable) window
+// is the Windows default. Vibrancy renders correctly opaque here; older builds
+// keep a transparent (no-snap) window to avoid the issue #122 text shearing.
+// Bisected on Win10 22H2: Electron 34 (VSCode 1.100.x) shears text on an opaque
+// vibrancy window; Electron 35.5.1 (VSCode 1.101.0, the first E35 build) renders
+// it cleanly. 1.101.0 is therefore the confirmed-good floor.
+const WIN_OPAQUE_MIN_VSCODE = [1, 101];
+
+function vscodeVersionAtLeast([major, minor]) {
+  const m = /^(\d+)\.(\d+)/.exec(vscode.version || '');
+  if (!m) return false;
+  const cur = [Number(m[1]), Number(m[2])];
+  return cur[0] > major || (cur[0] === major && cur[1] >= minor);
+}
+
+const { StagedFileWriter, checkNeedsElevation, hasNoNewPrivs, setTerminalRunner } = require('./elevated-file-writer');
+const { runElevatedInTerminal } = require('./terminal-elevation');
+
+// Linux only: give the elevation module a way to prompt for a password in a
+// real terminal when pkexec isn't usable (no Polkit agent registered).
+if (process.platform === 'linux') {
+  setTerminalRunner(({ command, script }) => runElevatedInTerminal({
+    command,
+    script,
+    title: localize('terminal.elevationTitle'),
+    prompt: localize('terminal.elevationPrompt'),
+  }));
+}
+
+var themeStylePaths = {
+  'Default Dark': '../themes/Default Dark.css',
+  'Dark (Exclude Tab Line)': '../themes/Dark (Exclude Tab Line).css',
+  'Dark (Only Subbar)': '../themes/Dark (Only Subbar).css',
+  'Default Light': '../themes/Default Light.css',
+  'Light (Only Subbar)': '../themes/Light (Only Subbar).css',
+  'Tokyo Night Storm': '../themes/Tokyo Night Storm.css',
+  'Tokyo Night Storm (Outer)': '../themes/Tokyo Night Storm (Outer).css',
+  'Noir et blanc': '../themes/Noir et blanc.css',
+  'Solarized Dark+': '../themes/Solarized Dark+.css',
+  'Catppuccin Mocha': '../themes/Catppuccin Mocha.css',
+  'GitHub Dark Default': '../themes/GitHub Dark Default.css',
+  'Paradise Smoked Glass': '../themes/Paradise Smoked Glass.css',
+  'Paradise Frosted Glass': '../themes/Paradise Frosted Glass.css',
+  'Atom One Dark': '../themes/Atom One Dark.css',
+  'Custom theme (use imports)': '../themes/Custom Theme.css',
+}
+
+const themeConfigPaths = {
+  'Default Dark': '../themes/Default Dark.json',
+  'Dark (Exclude Tab Line)': '../themes/Dark (Exclude Tab Line).json',
+  'Dark (Only Subbar)': '../themes/Dark (Only Subbar).json',
+  'Default Light': '../themes/Default Light.json',
+  'Light (Only Subbar)': '../themes/Light (Only Subbar).json',
+  'Tokyo Night Storm': '../themes/Tokyo Night Storm.json',
+  'Tokyo Night Storm (Outer)': '../themes/Tokyo Night Storm (Outer).json',
+  'Noir et blanc': '../themes/Noir et blanc.json',
+  'Solarized Dark+': '../themes/Solarized Dark+.json',
+  'Catppuccin Mocha': '../themes/Catppuccin Mocha.json',
+  'GitHub Dark Default': '../themes/GitHub Dark Default.json',
+  'Paradise Smoked Glass': '../themes/Paradise Smoked Glass.json',
+  'Paradise Frosted Glass': '../themes/Paradise Frosted Glass.json',
+  'Atom One Dark': '../themes/Atom One Dark.json',
+  'Custom theme (use imports)': '../themes/Custom Theme.json',
+}
+
+const themeFixPaths = {
+  'Cursor': {
+    'Default Dark': '../themes/fixes/Cursor Dark.css',
+    'Default Light': '../themes/fixes/Cursor Light.css',
+    'Paradise Smoked Glass': '../themes/fixes/Paradise Cursor.css',
+    'Paradise Frosted Glass': '../themes/fixes/Paradise Cursor.css',
+  },
+  'Antigravity': {
+    'Default Dark': '../themes/fixes/Antigravity.css',
+    'Default Light': '../themes/fixes/Antigravity.css',
+  },
+  'Antigravity IDE': {
+    'Default Dark': '../themes/fixes/Antigravity.css',
+    'Default Light': '../themes/fixes/Antigravity.css',
+  }
+}
+
+const knownEditors = [
+  'Visual Studio Code',
+  'Visual Studio Code - Insiders',
+  'VSCodium',
+  'Cursor',
+  'Code - OSS',
+  'Antigravity',
+  'Antigravity IDE',
+  'Devin',
+];
+
+// Map editor app names to their CLI commands for relaunch
+const editorCliCommands = {
+  'Visual Studio Code': 'code',
+  'Visual Studio Code - Insiders': 'code-insiders',
+  'VSCodium': 'codium',
+  'Cursor': 'cursor',
+  'Code - OSS': 'code-oss',
+  'Antigravity': 'antigravity',
+  'Antigravity IDE': 'antigravity-ide',
+  'Devin': 'devin-desktop',
+};
+
+// Map editor app names to their config directory names (for settings.json path)
+const editorConfigDirNames = {
+  'Visual Studio Code': 'Code',
+  'Visual Studio Code - Insiders': 'Code - Insiders',
+  'VSCodium': 'VSCodium',
+  'Cursor': 'Cursor',
+  'Code - OSS': 'Code - OSS',
+  'Antigravity': 'Antigravity',
+  'Antigravity IDE': 'Antigravity IDE',
+  'Devin': 'Devin',
+};
+
+var defaultTheme = 'Default Dark';
+
+// Compute the platform-specific settings.json path for a given editor
+function getEditorSettingsPath(appName) {
+  const dirName = editorConfigDirNames[appName] || 'Code';
+  const home = os.homedir();
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), dirName, 'User', 'settings.json');
+  } else if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', dirName, 'User', 'settings.json');
+  } else {
+    return path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), dirName, 'User', 'settings.json');
+  }
+}
+
+// Pending .node file copies deferred until after VSCode exits (Windows only).
+// Windows hard-locks loaded .node modules, so the restart script copies them
+// in the gap between exit and relaunch.
+var pendingNodeCopies = [];
+
+function getCurrentTheme(config) {
+  return config.theme in themeStylePaths ? config.theme : defaultTheme;
+}
+
+/**
+ * The active Vibrancy theme's config JSON, or undefined if it can't be resolved.
+ *
+ * Callers use this to learn which colour keys the theme adds on top of
+ * Vibrancy's built-in set, so a theme that can't be loaded must degrade to "no
+ * extra keys" rather than throwing — every caller is doing cleanup or
+ * diagnostics, and neither is worth failing an uninstall over.
+ */
+function getCurrentThemeConfig() {
+  try {
+    const vibrancyTheme = getCurrentTheme(vscode.workspace.getConfiguration("vscode_vibrancy"));
+    return require(path.resolve(__dirname, themeConfigPaths[vibrancyTheme]));
+  } catch (error) {
+    console.warn('Vibrancy: could not resolve the current theme config:', error);
+    return undefined;
+  }
+}
+
+// Settings that were renamed (e.g. to fix a typo): [oldKey, newKey].
+const renamedSettings = [
+  ['vscode_vibrancy.preferedDarkTheme', 'vscode_vibrancy.preferredDarkTheme'],
+  ['vscode_vibrancy.preferedLightTheme', 'vscode_vibrancy.preferredLightTheme'],
+];
+
+// Read a renamed setting, migrating from the old key transparently: prefer an
+// explicitly-set new key, then an explicitly-set (deprecated) old key, otherwise
+// the new key's default. inspect() is used because both keys carry the same
+// default, so get() alone can't tell whether a value was actually configured.
+function getRenamedSetting(newKey, oldKey) {
+  const config = vscode.workspace.getConfiguration();
+  const explicit = (key) => {
+    const i = config.inspect(key);
+    return i && (i.workspaceFolderValue ?? i.workspaceValue ?? i.globalValue);
+  };
+  return explicit(newKey) ?? explicit(oldKey) ?? config.get(newKey);
+}
+
+// Actively move any explicitly-set deprecated (misspelled) keys to their new
+// names at the same scope, then clear the old key so VSCode stops warning. Runs
+// during install (inside the operation guard), so the resulting config writes
+// don't trigger the onDidChangeConfiguration reload prompt. Best-effort: failures
+// are logged but never block install, and getRenamedSetting() still honors the
+// old key meanwhile.
+async function migrateRenamedSettings() {
+  const config = vscode.workspace.getConfiguration();
+  const scopes = [
+    ['globalValue', vscode.ConfigurationTarget.Global],
+    ['workspaceValue', vscode.ConfigurationTarget.Workspace],
+  ];
+  for (const [oldKey, newKey] of renamedSettings) {
+    const oldInspect = config.inspect(oldKey);
+    const newInspect = config.inspect(newKey);
+    if (!oldInspect) continue;
+    for (const [prop, target] of scopes) {
+      if (oldInspect[prop] === undefined) continue;
+      try {
+        // Don't clobber a value the user already set under the new key.
+        if (newInspect && newInspect[prop] === undefined) {
+          await config.update(newKey, oldInspect[prop], target);
+        }
+        await config.update(oldKey, undefined, target);
+      } catch (err) {
+        console.error(`Failed to migrate ${oldKey} -> ${newKey}:`, err);
+      }
+    }
+  }
+}
+
+function checkDarkLightMode(theme) {
+  const currentTheme = theme.kind;
+
+  // Sync Vibrancy theme with VSCode color theme
+  const currentColorTheme = vscode.workspace.getConfiguration().get("vscode_vibrancy.theme");
+  const enableAutoTheme = vscode.workspace.getConfiguration().get("vscode_vibrancy.enableAutoTheme");
+  const preferredDarkColorTheme = getRenamedSetting("vscode_vibrancy.preferredDarkTheme", "vscode_vibrancy.preferedDarkTheme");
+  const preferredLightColorTheme = getRenamedSetting("vscode_vibrancy.preferredLightTheme", "vscode_vibrancy.preferedLightTheme");
+
+  let targetVibrancyTheme;
+  if (currentTheme === vscode.ColorThemeKind.Dark) {
+    targetVibrancyTheme = preferredDarkColorTheme;
+  } else if (currentTheme === vscode.ColorThemeKind.Light) {
+    targetVibrancyTheme = preferredLightColorTheme;}
+  else {
+    return;
+  }
+
+  if (enableAutoTheme && currentColorTheme !== targetVibrancyTheme) {
+      vscode.workspace.getConfiguration("vscode_vibrancy").update("theme", targetVibrancyTheme, vscode.ConfigurationTarget.Global);
+  }
+}
+
+async function promptRestart(setControlsStyle, globalState) {
+  // Set/remove window.controlsStyle right before quit — deferred to here so it
+  // doesn't trigger VSCode's built-in restart prompt during install/uninstall,
+  // which would cause an in-process reload and break polkit elevation. On macOS
+  // resolveWindowControlsStyle returns null (VSCode doesn't register the
+  // setting there), so this is a no-op.
+  const controlsStyle = resolveWindowControlsStyle({
+    platform: process.platform,
+    windowControlsStyle: vscode.workspace.getConfiguration("vscode_vibrancy").get("windowControlsStyle"),
+  });
+  if (controlsStyle) {
+    try {
+      const value = setControlsStyle ? controlsStyle : undefined;
+      await vscode.workspace.getConfiguration().update("window.controlsStyle", value, vscode.ConfigurationTarget.Global);
+    } catch (error) {
+      console.warn("window.controlsStyle is not supported in this version of VSCode.");
+    }
+  }
+
+  // Perform a full quit + relaunch to avoid the no_new_privs issue that
+  // occurs with in-process reloads (which prevents sudo/pkexec from working
+  // on subsequent elevation attempts).
+  //
+  // We write a self-contained script to /tmp and use nohup + setsid to fully
+  // detach it from VSCode's process tree, so it survives the parent exiting.
+  // Use the CLI command (e.g. 'code') instead of the raw Electron binary,
+  // since the CLI wrapper sets up the required environment.
+  const cliName = editorCliCommands[vscode.env.appName] || 'code';
+  const pid = process.pid;
+
+  if (process.platform === 'win32') {
+    // Resolve the full path to the CLI .cmd wrapper next to the install dir
+    // e.g. C:\Users\X\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd
+    const cliFullPath = path.join(path.dirname(process.execPath), 'bin', `${cliName}.cmd`);
+    const cliCommand = require('fs').existsSync(cliFullPath) ? cliFullPath : cliName;
+
+    // Build .node copy commands for the restart script.
+    // .node files are locked while VSCode runs, so we copy them after exit.
+    const nodeCopyLines = [];
+    if (pendingNodeCopies.length > 0) {
+      const needsElevation = checkNeedsElevation(path.dirname(pendingNodeCopies[0].dest));
+      if (needsElevation) {
+        // Write a PowerShell script to copy the .node files, run it elevated.
+        // VSCode is relaunched AFTER this completes, as a normal (non-admin) process.
+        const psCommands = pendingNodeCopies.map(({ src, dest }) =>
+          `Copy-Item -Path '${src.replace(/'/g, "''")}' -Destination '${dest.replace(/'/g, "''")}' -Force`
+        );
+        psCommands.push(`Remove-Item -Path '${os.tmpdir().replace(/'/g, "''")}\\vibrancy-node-copy.ps1' -Force -ErrorAction SilentlyContinue`);
+        const psScript = psCommands.join('\n');
+        const psPath = path.join(os.tmpdir(), 'vibrancy-node-copy.ps1');
+        require('fs').writeFileSync(psPath, psScript, 'utf-8');
+        nodeCopyLines.push(
+          `WshShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ""Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File """"${psPath.replace(/"/g, '""')}""""' -Verb RunAs -WindowStyle Hidden -Wait""", 0, True`,
+        );
+      } else {
+        // No elevation needed — copy via PowerShell (handles Unicode paths
+        // correctly, unlike VBScript's FileSystemObject which is ANSI-only).
+        const psCommands = pendingNodeCopies.map(({ src, dest }) =>
+          `Copy-Item -Path '${src.replace(/'/g, "''")}' -Destination '${dest.replace(/'/g, "''")}' -Force`
+        );
+        const psInline = psCommands.join('; ');
+        nodeCopyLines.push(
+          `WshShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ""${psInline.replace(/"/g, '""')}""", 0, True`,
+        );
+      }
+    }
+
+    // The editor binary name (e.g. "Code.exe") and the matching updater setup
+    // name pattern (e.g. "CodeSetup%"). Quitting the editor when an update is
+    // pending triggers its installer (CodeSetup*.exe) to rewrite the install in
+    // place; if we relaunch while that's still copying files, we race the
+    // extraction and can corrupt the install (missing icudtl.dat / DLLs → the
+    // editor won't start). So we wait for the updater to finish, and skip our
+    // relaunch entirely if the updater already brought the editor back up.
+    const binName = path.basename(process.execPath);
+    const updaterPattern = `${binName.replace(/\.exe$/i, '')}Setup%`;
+
+    // Pure VBScript: wait for our process to exit, copy .node files, wait out
+    // any in-progress editor update, relaunch hidden (unless already running),
+    // self-delete.
+    const vbsScript = [
+      `Set WshShell = CreateObject("WScript.Shell")`,
+      `Set WMI = GetObject("winmgmts:\\\\.\\root\\cimv2")`,
+      `Do`,
+      `  WScript.Sleep 1000`,
+      `  Set procs = WMI.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE ProcessId = ${pid}")`,
+      `  If procs.Count = 0 Then Exit Do`,
+      `Loop`,
+      `WScript.Sleep 1000`,
+      ...nodeCopyLines,
+      // Wait out an in-progress editor update (capped at ~5 min so we can never
+      // hang forever) before touching the install by relaunching.
+      `vibWaited = 0`,
+      `Do While vibWaited < 300`,
+      `  Set ups = WMI.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name LIKE '${updaterPattern}'")`,
+      `  If ups.Count = 0 Then Exit Do`,
+      `  WScript.Sleep 1000`,
+      `  vibWaited = vibWaited + 1`,
+      `Loop`,
+      `WScript.Sleep 2000`,
+      // The updater relaunches the editor itself after applying an update, so
+      // only start it if nothing is already running (avoids a duplicate window
+      // and avoids launching into a half-applied install).
+      `Set running = WMI.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name = '${binName}'")`,
+      `If running.Count = 0 Then`,
+      `  WshShell.Run """${cliCommand}""", 0, False`,
+      `End If`,
+      `CreateObject("Scripting.FileSystemObject").DeleteFile WScript.ScriptFullName`,
+    ].join('\r\n');
+    const vbsPath = path.join(os.tmpdir(), 'vibrancy-restart.vbs');
+    // Write as UTF-16LE with BOM so wscript.exe correctly handles Unicode
+    // paths (e.g. non-ASCII usernames) instead of misinterpreting UTF-8.
+    const vbsBom = Buffer.from([0xFF, 0xFE]);
+    const vbsContent = Buffer.from(vbsScript, 'utf16le');
+    require('fs').writeFileSync(vbsPath, Buffer.concat([vbsBom, vbsContent]));
+    spawn('wscript', [vbsPath], {
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+  } else if (process.platform === 'darwin') {
+    // macOS: use VSCode's built-in restart prompt by toggling titleBarStyle.
+    // The toggle briefly persists the flipped value, so the sequencing lives
+    // in mac-restart-toggle.js: the original is recorded in globalState
+    // before the first write and any interrupted toggle is healed on the
+    // next activation — otherwise a stranded "native" hides the window
+    // controls with no obvious user-facing fix.
+    const config = vscode.workspace.getConfiguration();
+    await toggleTitleBarForRestartPrompt({
+      settingsStore: {
+        inspect: (key) => config.inspect(key),
+        get: (key) => config.get(key),
+        update: (key, value) => config.update(key, value, vscode.ConfigurationTarget.Global),
+      },
+      globalState,
+    });
+    return;
+  } else {
+    // Linux: use setsid + nohup to fully detach from VSCode's process tree
+    const binName = path.basename(process.execPath);
+    const script = `#!/bin/sh\nwhile pgrep -x '${binName.replace(/'/g, "'\\''")}' >/dev/null 2>&1; do sleep 1; done\nsleep 1\n${cliName} &\nrm -f "$0"\n`;
+    const scriptPath = path.join(os.tmpdir(), `vibrancy-restart-${pid}.sh`);
+    require('fs').writeFileSync(scriptPath, script, { mode: 0o755 });
+    spawn('setsid', ['nohup', scriptPath], {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore'],
+      env: { ...process.env, HOME: process.env.HOME },
+    }).unref();
+  }
+
+  // Quit VSCode — the detached script will relaunch after exit completes
+  vscode.commands.executeCommand('workbench.action.quit');
+}
+
+async function checkColorTheme(testMode) {
+  // Get the current color theme and target theme from configuration files
+  const currentTheme = getCurrentTheme(vscode.workspace.getConfiguration("vscode_vibrancy"));
+
+  // if theme is "Custom theme (use imports)", skip the check
+  if (currentTheme === 'Custom theme (use imports)') {
+    return;
+  }
+
+  const themeConfig = require(path.join(__dirname, themeConfigPaths[currentTheme]));
+  const targetTheme = themeConfig.colorTheme;
+  const currentColorTheme = vscode.workspace.getConfiguration().get("workbench.colorTheme");
+
+  // VSCode 1.113 has renamed some built-in themes (e.g. "Default Dark+" -> "Dark+").
+  // Normalize both sides so renamed themes don't trigger a false mismatch.
+  const themeAliases = {
+    'Default Dark+': 'Dark+',
+    'Default Light+': 'Light+',
+  };
+  const normalizeThemeName = (name) => themeAliases[name] || name;
+  const themesMatch = normalizeThemeName(targetTheme) === normalizeThemeName(currentColorTheme);
+
+  // Show a message to the user if the current color theme doesn't match the target theme
+  if (!themesMatch) {
+    if (testMode) {
+      // In test mode, force-set the color theme without prompting
+      await vscode.workspace.getConfiguration().update("workbench.colorTheme", targetTheme, vscode.ConfigurationTarget.Global);
+      return;
+    }
+
+    const message = localize('messages.recommendedColorTheme')
+      .replace('%1', currentColorTheme)
+      .replace('%2', targetTheme);
+
+    const result = await vscode.window.showInformationMessage(message, localize('messages.changeColorThemeIde'), localize('messages.noIde'));
+
+    // If the user chooses to change the color theme, update the configuration
+    if (result === localize('messages.changeColorThemeIde')) {
+      await vscode.workspace.getConfiguration().update("workbench.colorTheme", targetTheme, vscode.ConfigurationTarget.Global);
+    }
+  }
+}
+
+// Electron 26 changed the available vibrancy types, this ensures that upgrading users switch
+async function checkElectronDeprecatedType() {
+  let electronVersion = process.versions.electron;
+  let majorVersion = parseInt(electronVersion.split('.')[0]);
+
+  if (majorVersion > 25) {
+    const currentType = vscode.workspace.getConfiguration("vscode_vibrancy").type;
+    const deprecatedTypes = [
+      "appearance-based",
+      "dark",
+      "ultra-dark",
+      "light",
+      "medium-light"
+    ];
+
+    if (deprecatedTypes.includes(currentType)) {
+      vscode.window.showWarningMessage(
+        localize('messages.electronDeprecatedType').replace('%1', currentType),
+        { title: "Default" },
+        { title: "Transparent" }
+      ).then(async (msg) => {
+        if (msg) {
+          const newType = msg.title === "Default" ? "under-window" : "fullscreen-ui";
+          await vscode.workspace
+            .getConfiguration("vscode_vibrancy")
+            .update("type", newType, vscode.ConfigurationTarget.Global);
+        }
+      });
+    }
+  }
+}
+
+function activate(context) {
+  const testModeFile = path.join(getConfigDir('vscode-vibrancy-continued'), 'test-mode');
+  const testMode = require('fs').existsSync(testModeFile);
+  console.log('vscode-vibrancy is active!' + (testMode ? ' (test mode)' : ''));
+
+  if (testMode) {
+    vscode.window.showInformationMessage('Vibrancy Continued: Test mode active');
+  }
+
+  const testSignalPath = testMode ? path.join(path.dirname(testModeFile), 'test-result') : null;
+
+  var testSignalFailed = false;
+  function writeTestSignal(status, message) {
+    if (!testMode) return;
+    if (status === 'error') testSignalFailed = true;
+    try {
+      require('fs').writeFileSync(testSignalPath, JSON.stringify({ status, message, ts: Date.now() }));
+      console.log(`Vibrancy test signal: ${status} — ${message}`);
+    } catch (err) {
+      console.error('Failed to write test signal:', err);
+    }
+  }
+
+  // Check if the harness is requesting an uninstall
+  const testUninstallFile = testMode ? path.join(path.dirname(testModeFile), 'test-uninstall') : null;
+  const testUninstallRequested = testMode && require('fs').existsSync(testUninstallFile);
+
+  var appDir;
+  try {
+    appDir = path.dirname(require.main.filename);
+  } catch {
+    appDir = _VSCODE_FILE_ROOT;
+  }
+  // Which files get patched, and which runtime flavour they need. Probed
+  // against appDir — the directory VSCode is really running from — before any
+  // NixOS mirror retargeting below; install-paths.js explains why that order
+  // is load-bearing and how it is enforced.
+  var installPaths = resolveInstallPaths({ appDir, exists: (p) => fs.existsSync(p) });
+
+  // Separate bindings for the ~40 read sites downstream. retargetToMirror is
+  // the only thing that moves them, and it reassigns them as a group.
+  var { jsFile: JSFile, electronJsFile: ElectronJSFile, htmlFile: HTMLFile, runtimeDir } = installPaths;
+  const { runtimeSrcDir, useEsmRuntime } = installPaths;
+
+  // ####  NixOS shadow install  ##############################################
+  // On NixOS the install dir is a read-only /nix/store path where elevation
+  // can't help. Redirect all patching to a writable mirror of the package
+  // under $HOME (see nix-mirror.js). The mirror is a verbatim copy, so the
+  // existence checks above (done against the store) remain valid after
+  // rebasing the target paths onto it.
+  const nixMirror = process.platform === 'linux' ? require('./nix-mirror') : null;
+  var usingMirror = false;
+  var mirrorStoreRoot = null;
+  const launchedFromMirror = nixMirror ? nixMirror.isMirrorPath(appDir) : false;
+
+  function retargetToMirror(storeRoot, fromDir) {
+    // rebaseInstallPaths returns a new object and rejects paths that aren't
+    // under fromDir, so retargeting twice — a nixos-rebuild moving the store
+    // path under a running mirror — can't quietly double-rebase.
+    installPaths = rebaseInstallPaths(installPaths, {
+      fromDir,
+      toDir: nixMirror.mirrorTargetDir(storeRoot, fromDir),
+    });
+    ({ jsFile: JSFile, electronJsFile: ElectronJSFile, htmlFile: HTMLFile, runtimeDir } = installPaths);
+    mirrorStoreRoot = storeRoot;
+    usingMirror = true;
+  }
+
+  if (nixMirror && checkNeedsElevation(appDir) === 'nix') {
+    try {
+      retargetToMirror(nixMirror.deriveStoreRoot(appDir), appDir);
+    } catch (err) {
+      console.error('Vibrancy: failed to derive Nix store root:', err);
+    }
+  }
+
+  var mirrorReady = false;
+  async function ensureMirrorIfNeeded() {
+    if (!usingMirror || mirrorReady) return;
+    const doEnsure = async () => {
+      await nixMirror.ensureMirror(mirrorStoreRoot, { vscodeVersion: vscode.version });
+      await nixMirror.writeDesktopEntry(nixMirror.mirrorRootFor(mirrorStoreRoot), vscode.env.appName);
+    };
+    if (testMode) {
+      await doEnsure();
+    } else {
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: localize('messages.nixMirrorProgress') },
+        doEnsure
+      );
+    }
+    mirrorReady = true;
+  }
+
+  async function installRuntime(writer) {
+    // if runtimeDir exists, recurse through it and delete all files
+    if (fs.existsSync(runtimeDir)) {
+      await writer.rmdir(runtimeDir);
+    }
+
+    await writer.mkdir(runtimeDir);
+    await writer.copyDir(path.resolve(__dirname, runtimeSrcDir), path.resolve(runtimeDir));
+  }
+
+  async function installRuntimeWin(writer) {
+    if (fs.existsSync(runtimeDir)) {
+      try {
+        await writer.rmdir(runtimeDir);
+      } catch (err) {
+        // On Windows, locked .node files may prevent full deletion.
+        // Continue — copyDir will overwrite unlocked files, and locked
+        // .node files will be handled by the deferred copy below.
+        if (err.code !== 'EBUSY' && err.code !== 'EPERM') {
+          throw err;
+        }
+      }
+    }
+    await writer.mkdir(runtimeDir);
+    await writer.copyDir(path.resolve(__dirname, runtimeSrcDir), path.resolve(runtimeDir));
+
+    // .node files may be locked by the running VSCode process on Windows.
+    // Try to copy them directly first; if locked (EBUSY/EPERM), defer to
+    // the restart script which copies them after VSCode exits.
+    // When elevation is required, the staged flush() also runs while VSCode
+    // is active, so .node files must always be deferred in that case.
+    pendingNodeCopies = [];
+    const nativePrebuiltDir = path.resolve(__dirname, '../native/prebuilt');
+    if (fs.existsSync(nativePrebuiltDir)) {
+      const files = fs.readdirSync(nativePrebuiltDir);
+      for (const file of files) {
+        if (file.endsWith('.node')) {
+          if (writer.requiresElevation) {
+            pendingNodeCopies.push({
+              src: path.join(nativePrebuiltDir, file),
+              dest: path.join(runtimeDir, file),
+            });
+          } else {
+            try {
+              await writer.copyFile(
+                path.join(nativePrebuiltDir, file),
+                path.join(runtimeDir, file)
+              );
+            } catch (err) {
+              if (err.code === 'EBUSY' || err.code === 'EPERM') {
+                pendingNodeCopies.push({
+                  src: path.join(nativePrebuiltDir, file),
+                  dest: path.join(runtimeDir, file),
+                });
+              } else {
+                throw err;
+              }
+            }
+          }
+        } else {
+          await writer.copyFile(
+            path.join(nativePrebuiltDir, file),
+            path.join(runtimeDir, file)
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Inject the vibrancy runtime bootstrap into the workbench main.js.
+   *
+   * `baseJS` overrides the on-disk content, so a caller that has already
+   * patched the same file in memory can fold this transform into that copy
+   * instead of re-reading it (see Install).
+   */
+  async function installJS(writer, baseJS) {
+    const config = vscode.workspace.getConfiguration("vscode_vibrancy");
+    const currentTheme = getCurrentTheme(config);
+    const themeConfigPath = path.resolve(__dirname, themeConfigPaths[currentTheme]);
+    const themeConfig = require(themeConfigPath);
+    const themeStylePath = path.join(__dirname, themeStylePaths[currentTheme]);
+    const themeCSS = await fs.readFile(themeStylePath, 'utf-8');
+    const JS = baseJS !== undefined ? baseJS : await fs.readFile(JSFile, 'utf-8');
+
+    const imports = await generateImports(config);
+
+    const injectData = {
+      os: osType,
+      win11: isWindows11,
+      config: config,
+      theme: themeConfig,
+      themeCSS: themeCSS,
+      imports: imports,
+    };
+
+    const base = __filename;
+    const newJS = generateNewJS(JS, base, injectData);
+
+    await writer.writeFile(JSFile, newJS, 'utf-8');
+  }
+
+  async function generateImports(config) {
+    const imports = {
+      css: "",
+      js: "",
+    };
+
+    // Add theme fixes for non-VSCode editors
+    const disableThemeFixes = vscode.workspace.getConfiguration().get("vscode_vibrancy.disableThemeFixes");
+    const currentColorTheme = vscode.workspace.getConfiguration().get("vscode_vibrancy.theme");
+    if (
+      !disableThemeFixes &&
+      vscode.env.appName in themeFixPaths &&
+      themeFixPaths[vscode.env.appName][currentColorTheme]
+    ) {
+      let targetPatchTheme = themeFixPaths[vscode.env.appName][currentColorTheme];
+      const themePatchPath = path.join(__dirname, targetPatchTheme);
+
+      try {
+        const themePatchContent = await fs.readFile(themePatchPath, 'utf-8');
+        imports.css += `<style>${themePatchContent.replace(/<\/style/gi, '<\\/style')}</style>`;
+      } catch (err) {
+        vscode.window.showWarningMessage(localize('messages.importError').replace('%1', targetPatchTheme));
+      }
+    }
+
+    for (let i = 0; i < config.imports.length; i++) {
+      if (config.imports[i] === "/path/to/file") continue;
+
+      try {
+        const importContent = await fs.readFile(config.imports[i], 'utf-8');
+
+        if (config.imports[i].endsWith('.css')) {
+          imports.css += `<style>${importContent.replace(/<\/style/gi, '<\\/style')}</style>`;
+        } else {
+          imports.js += `<script>${importContent.replace(/<\/script/gi, '<\\/script')}</script>`;
+        }
+      } catch (err) {
+        vscode.window.showWarningMessage(localize('messages.importError').replace('%1', config.imports[i]));
+      }
+    }
+
+    return imports;
+  }
+
+  function generateNewJS(JS, base, injectData) {
+    const runtimePath = useEsmRuntime
+      ? path.join(runtimeDir, "index.mjs")
+      : path.join(runtimeDir, "index.cjs");
+    return _generateNewJS(JS, base, injectData, runtimePath);
+  }
+
+  // BrowserWindow option modification
+  /**
+   * Inject the frameless/transparent BrowserWindow options into Electron's main file.
+   *
+   * Writes through `writer` when given one; pass a falsy writer to get the
+   * patched content back instead, so a caller can fold another transform into
+   * the same buffer (see Install).
+   *
+   * @returns {Promise<string|undefined>} the patched content, or undefined when
+   *   this editor doesn't get window options injected at all.
+   */
+  async function modifyElectronJSFile(ElectronJSFile, writer) {
+    const config = vscode.workspace.getConfiguration("vscode_vibrancy");
+    const electronMajorVersion = parseInt(process.versions.electron.split('.')[0]);
+    let ElectronJS = await fs.readFile(ElectronJSFile, 'utf-8');
+
+    // The 'transparent' vibrancy type paints no blur material, so it needs an
+    // actually see-through window; every other type paints over an opaque window
+    // (native NSVisualEffectView on macOS, DWM backdrop on Win11). Resolve 'auto'
+    // against the theme's per-OS default to tell whether transparency is needed.
+    const resolvedType = config.type === 'auto'
+      ? require(path.resolve(__dirname, themeConfigPaths[getCurrentTheme(config)])).type[osType]
+      : config.type;
+    const platformCtx = {
+      osType,
+      platform: process.platform,
+      electronMajorVersion,
+      appName: vscode.env.appName,
+      isWindows11,
+      transparentType: resolvedType === 'transparent',
+      // On Windows an opaque window can Aero-Snap, but opaque vibrancy renders
+      // with sheared/unreadable text on older builds (issue #122 needed a
+      // transparent window). Only default to opaque on a VSCode build where it's
+      // been confirmed good; older builds keep the transparent (no-snap)
+      // behavior so nobody regresses.
+      winOpaqueSafe: vscodeVersionAtLeast(WIN_OPAQUE_MIN_VSCODE),
+    };
+
+    // Resolve the effective window mode, migrating the deprecated boolean
+    // settings (forceFramelessWindow / disableFramelessWindow) onto the new
+    // windowMode enum. An explicit windowMode always wins over the legacy flags;
+    // the migration is platform/material-aware so it never produces a broken
+    // combination (e.g. a transparent window over a Win11 Mica material).
+    const windowMode = resolveEffectiveWindowMode({
+      ...platformCtx,
+      windowMode: config.windowMode,
+      forceFramelessWindow: config.forceFramelessWindow,
+      disableFramelessWindow: config.disableFramelessWindow,
+    });
+    const frameCtx = { ...platformCtx, windowMode };
+    const { frameless, transparent } = resolveWindowMode(frameCtx);
+
+    // Linux has no native vibrancy material — the effect *is* the window's
+    // transparency, which only a frameless window gets. So a framed window
+    // there installs cleanly and then renders nothing at all, with no error
+    // anywhere. macOS and Windows still show vibrancy on an opaque window
+    // (NSVisualEffectView / DWM backdrop), so this only applies here.
+    if (process.platform === 'linux' && !frameless) {
+      vscode.window.showWarningMessage(localize('messages.linuxFramedNoEffect'));
+    }
+
+    // On non-VSCode editors, injecting frameless+transparent window options is
+    // risky, so we only do it on a list of known working editors.
+    if (!knownEditors.includes(vscode.env.appName)) {
+      if (frameless) {
+        // A frameless result on an unsupported editor has two causes with very
+        // different fixes:
+        //   1. The editor's own defaults require it (truly unsupported) — nothing
+        //      the user can do.
+        //   2. An explicit windowMode forced it on even though 'auto' would have
+        //      left it framed — a user misconfiguration that can be undone.
+        // Resolve again as 'auto' to tell them apart.
+        const auto = resolveWindowMode({ ...frameCtx, windowMode: 'auto' });
+        if (windowMode !== 'auto' && !auto.frameless) {
+          throw new Error(localize('messages.forceFramelessUnsupportedEditor'));
+        }
+        throw new Error(localize('messages.unsupportedEditor'));
+      }
+      return;
+    }
+
+    ElectronJS = injectElectronOptions(ElectronJS, { frameless, isMacos: osType === 'macos', transparent });
+
+    if (writer) await writer.writeFile(ElectronJSFile, ElectronJS, 'utf-8');
+    return ElectronJS;
+  }
+
+  async function installHTML(writer) {
+    const HTML = await fs.readFile(HTMLFile, 'utf-8');
+    const { result, alreadyPatched, noMetaTag } = _patchCSP(HTML);
+
+    if (noMetaTag) return;
+
+    // Always write if already patched to overwrite any staged uninstall in Update flow
+    if (alreadyPatched) {
+      await writer.writeFile(HTMLFile, HTML, 'utf-8');
+      return;
+    }
+
+    await writer.writeFile(HTMLFile, result, 'utf-8');
+  }
+
+  async function uninstallJS(writer) {
+    let JS = await fs.readFile(JSFile, 'utf-8');
+    const { result, hadMarkers } = removeJSMarkers(JS);
+    JS = result;
+
+    if (knownEditors.includes(vscode.env.appName)) {
+      if (ElectronJSFile === JSFile) {
+        // VSCode 1.95+: both files are the same main.js — apply all cleanups
+        // to a single in-memory copy to avoid the second write overwriting the first
+        JS = removeElectronOptions(JS);
+        await writer.writeFile(JSFile, JS, 'utf-8');
+      } else {
+        if (hadMarkers) {
+          await writer.writeFile(JSFile, JS, 'utf-8');
+        }
+        const ElectronJS = await fs.readFile(ElectronJSFile, 'utf-8');
+        await writer.writeFile(ElectronJSFile, removeElectronOptions(ElectronJS), 'utf-8');
+      }
+    } else if (hadMarkers) {
+      await writer.writeFile(JSFile, JS, 'utf-8');
+    }
+  }
+
+  async function uninstallHTML(writer) {
+    const HTML = await fs.readFile(HTMLFile, 'utf-8');
+    const newHTML = removeCSPPatch(HTML);
+    if (newHTML !== HTML) {
+      await writer.writeFile(HTMLFile, newHTML, 'utf-8');
+    }
+  }
+
+  function enabledRestart() {
+    if (testMode) return;
+    // In mirror mode the patched files belong to a different copy of VSCode
+    // than the one currently running — restarting this instance won't show
+    // vibrancy. Point the user at the mirror's desktop entry instead. Modal,
+    // and shown BEFORE window.controlsStyle is written: that write triggers
+    // VSCode's own "restart to take effect" toast, whose Restart button only
+    // restarts this unpatched instance — sequencing the modal first ensures
+    // the user reads the instruction before that dead-end prompt can appear.
+    if (usingMirror) {
+      vscode.window.showInformationMessage(
+        localize('messages.nixRelaunchTitle'),
+        { modal: true, detail: localize('messages.nixRelaunch').replace('%1', vscode.env.appName) }
+      ).then(() => setControlsStyleCustom());
+      return;
+    }
+    vscode.window.showInformationMessage(localize('messages.enabled'), { title: localize('messages.restartIde') })
+      .then(function (msg) {
+        msg && promptRestart(true, context.globalState);
+      });
+  }
+
+  function disabledRestart() {
+    if (testMode) return;
+    vscode.window.showInformationMessage(localize('messages.disabled'), { title: localize('messages.restartIde') })
+      .then(function (msg) {
+        msg && promptRestart(false, context.globalState);
+      });
+  }
+
+  // Fix UI rendering by modifying VSCode settings
+  async function changeVSCodeSettings() {
+    const vibrancyConfig = vscode.workspace.getConfiguration("vscode_vibrancy");
+    const vibrancyTheme = getCurrentTheme(vibrancyConfig);
+    const themeConfigPath = path.resolve(__dirname, themeConfigPaths[vibrancyTheme]);
+    const themeConfig = require(themeConfigPath);
+    const enableAutoTheme = vscode.workspace.getConfiguration().get("vscode_vibrancy.enableAutoTheme");
+    const disableColorCustomizations = vibrancyConfig.get("disableColorCustomizations");
+
+    let opacity = vibrancyConfig.get("opacity");
+    if (opacity < 0) {
+      opacity = themeConfig.opacity?.[osType] ?? 0.5;
+    }
+
+    const themeBackground = vibrancyConfig.get("backgroundOverride")
+      ? vibrancyConfig.get("backgroundOverride").replace('#', '')
+      : themeConfig.background;
+
+    const config = vscode.workspace.getConfiguration();
+    const settingsStore = {
+      inspect: (key) => config.inspect(key),
+      update: (key, value) => config.update(key, value, vscode.ConfigurationTarget.Global),
+    };
+
+    return applySettings({
+      settingsStore,
+      globalState: context.globalState,
+      themeConfig,
+      enableAutoTheme,
+      disableColorCustomizations,
+      opacity,
+      themeBackground,
+      showInfo: (msg) => vscode.window.showInformationMessage(msg),
+      localize,
+    });
+  }
+
+  // Function to restore previous settings on uninstall
+  async function restorePreviousSettings() {
+    const vibrancyConfig = vscode.workspace.getConfiguration("vscode_vibrancy");
+    const disableColorCustomizations = vibrancyConfig.get("disableColorCustomizations");
+    const config = vscode.workspace.getConfiguration();
+
+    // Best-effort: lets the restore clean up colour keys the active theme
+    // introduces even when the backup in globalState is missing. A theme that
+    // can't be resolved must not block the uninstall.
+    const themeConfig = getCurrentThemeConfig();
+
+    return restoreSettings({
+      settingsStore: {
+        inspect: (key) => config.inspect(key),
+        update: (key, value) => config.update(key, value, vscode.ConfigurationTarget.Global),
+      },
+      globalState: context.globalState,
+      disableColorCustomizations,
+      themeConfig,
+    });
+  }
+
+  async function getLocalConfigPath() {
+    const configDir = getConfigDir('vscode-vibrancy-continued');
+    const configFilePath = path.join(configDir, 'config.json');
+
+    // Ensure the directory exists recursively
+    await fs.mkdir(configDir, { recursive: true }).catch(() =>
+      console.warn(`Failed to create directory: ${configDir}`)
+    );
+
+    return configFilePath;
+  }
+
+  /**
+   * Read VSCode's profile registry, or an empty list if it can't be read.
+   *
+   * @returns {Array} result of listProfiles — always contains the default profile
+   */
+  function getProfiles() {
+    const userDir = path.dirname(getEditorSettingsPath(vscode.env.appName));
+    let storage = null;
+    try {
+      storage = JSON.parse(require('fs').readFileSync(path.join(userDir, 'globalStorage', 'storage.json'), 'utf-8'));
+    } catch {
+      // No profiles have ever been created, or the file is mid-write. Either
+      // way the default profile is still describable, so carry on with just it.
+    }
+    return listProfiles(userDir, storage);
+  }
+
+  /**
+   * The settings.json this extension host actually reads and writes.
+   *
+   * Not the same thing as `getEditorSettingsPath`, which only ever names the
+   * default profile's file. Recording that path for a named profile pointed the
+   * uninstall hook at a file whose colour customizations belonged to somebody
+   * else, so the real ones were never cleaned up.
+   */
+  function getCurrentSettingsPath() {
+    try {
+      const profile = findProfileByGlobalStorage(getProfiles(), context.globalStorageUri.fsPath);
+      if (profile) return profile.settingsPath;
+    } catch (error) {
+      console.warn('Vibrancy: could not resolve the current profile settings path:', error);
+    }
+    return getEditorSettingsPath(vscode.env.appName);
+  }
+
+  /**
+   * Scan the other profiles for colour customizations this install left behind.
+   *
+   * Read-only, and deliberately so: writing another profile's settings.json
+   * while a window has it open would be overwritten by that window's own cache
+   * anyway. The point is to be able to *name* the affected profiles instead of
+   * describing the problem in the abstract.
+   *
+   * @returns {Array<{profileNames: string[], keys: string[]}>}
+   */
+  function scanOtherProfilesForLeftovers() {
+    try {
+      const currentSettingsPath = getCurrentSettingsPath();
+      const themeConfig = getCurrentThemeConfig();
+      const managedKeys = resolveManagedBgKeys(themeConfig?.colorCustomizations);
+
+      // Whether each profile can clean up after itself. A profile created by
+      // "copy from profile" without its extensions carries Vibrancy's colours
+      // but not Vibrancy, so there is nothing there to run Disable.
+      const profiles = getProfiles().map((profile) => ({
+        ...profile,
+        hasVibrancy: profileHasExtension(readExtensionList(profile), 'illixion.vscode-vibrancy-continued'),
+      }));
+
+      return groupBySettingsFile(profiles)
+        .filter((target) => target.settingsPath !== currentSettingsPath)
+        .map((target) => {
+          let keys = [];
+          try {
+            const text = require('fs').readFileSync(target.settingsPath, 'utf-8');
+            keys = findVibrancyLeftovers(readColorCustomizations(text), managedKeys);
+          } catch {
+            // Missing file: a profile that has never had a setting changed.
+          }
+          return { profileNames: target.profileNames, keys, hasVibrancy: target.hasVibrancy };
+        });
+    } catch (error) {
+      console.warn('Vibrancy: could not scan other profiles:', error);
+      return [];
+    }
+  }
+
+  /** A profile's own extensions.json, or null when it doesn't narrow the set. */
+  function readExtensionList(profile) {
+    if (!profile.extensionsPath) return null;
+    try {
+      return JSON.parse(require('fs').readFileSync(profile.extensionsPath, 'utf-8'));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Tell profile users about the scope mismatch, at the point it's detectable.
+   *
+   * Nothing in VSCode's UI suggests that an extension's effect could be
+   * machine-wide while its colour settings are per profile, so the first
+   * encounter with it looks like a Vibrancy bug rather than a scoping artefact.
+   */
+  /**
+   * Re-record which profile's settings.json holds Vibrancy's colours, when the
+   * install predates Vibrancy knowing about profiles.
+   *
+   * Up to 1.1.92 this was always written as the *default* profile's file, so an
+   * install made from any other profile left the uninstall hook pointed at a
+   * settings.json that may never have held a vibrancy colour — stripping keys
+   * out of the wrong file and leaving the real ones behind. The fix only takes
+   * effect when config.json is rewritten, which happens on install or update,
+   * and a patch release doesn't trigger one. So heal it here instead of waiting
+   * for the user to reload Vibrancy.
+   *
+   * Only ever corrects it towards *this* profile, and only on evidence that
+   * this is the profile concerned — pointing the hook at the wrong file is the
+   * bug being fixed, so a guess would just move it somewhere else.
+   */
+  async function healStaleSettingsPath() {
+    const config = await readLocalConfig();
+    if (!config) return; // not installed
+
+    const currentSettingsPath = getCurrentSettingsPath();
+    if (config.settingsJsonPath === currentSettingsPath) return;
+
+    if (config.ownerProfileKey) {
+      // Recorded by a version that tracks ownership, so it also recorded the
+      // owner's settings path correctly. A mismatch here just means we're
+      // looking from a different profile, which is not ours to correct.
+      if (config.ownerProfileKey !== getProfileIdentity()?.key) return;
+    } else {
+      // Pre-ownership config: nothing says which profile installed. Only claim
+      // the path if this profile's settings.json actually holds the colours the
+      // hook would have to revert.
+      const managedKeys = resolveManagedBgKeys(getCurrentThemeConfig()?.colorCustomizations);
+      let leftovers = [];
+      try {
+        const text = require('fs').readFileSync(currentSettingsPath, 'utf-8');
+        leftovers = findVibrancyLeftovers(readColorCustomizations(text), managedKeys);
+      } catch {
+        // Unreadable or absent: no evidence, so leave the record alone.
+      }
+      if (!leftovers.length) return;
+    }
+
+    // Patch the one field rather than rewriting through setLocalConfig, which
+    // would need the install paths and would drop previousCustomizations.
+    const configFilePath = await getLocalConfigPath();
+    await fs.writeFile(
+      configFilePath,
+      JSON.stringify({ ...config, settingsJsonPath: currentSettingsPath }, null, 2),
+      'utf-8',
+    );
+    console.log(`Vibrancy: corrected the recorded settings.json path to ${currentSettingsPath}`);
+  }
+
+  async function showProfileTip() {
+    try {
+      const situation = assessProfileSituation({
+        profiles: getProfiles(),
+        leftovers: scanOtherProfilesForLeftovers(),
+        introductionShown: context.globalState.get('profileTipShown') === true,
+      });
+
+      if (situation.kind === 'stranded' || situation.kind === 'unreachable') {
+        vscode.window.showWarningMessage(
+          localize(situation.kind === 'unreachable'
+            ? 'messages.profileLeftoversUnreachable'
+            : 'messages.profileLeftovers')
+            .replace('{0}', situation.profileNames.join(', '))
+            .replace('{1}', String(situation.keys.length)),
+        );
+      } else if (situation.kind === 'introduction') {
+        vscode.window.showInformationMessage(
+          localize('messages.profileTip').replace('{0}', situation.profileNames.join(', ')),
+        );
+        await context.globalState.update('profileTipShown', true);
+      }
+    } catch (error) {
+      console.warn('Vibrancy: could not evaluate the profile tip:', error);
+    }
+  }
+
+  /** Identity of the VSCode profile this extension host belongs to. */
+  function getProfileIdentity() {
+    try {
+      return deriveProfileIdentity(context.globalStorageUri.fsPath);
+    } catch (error) {
+      console.warn('Vibrancy: could not determine the current profile:', error);
+      return null;
+    }
+  }
+
+  async function readLocalConfig() {
+    try {
+      const configFilePath = path.join(getConfigDir('vscode-vibrancy-continued'), 'config.json');
+      return JSON.parse(await fs.readFile(configFilePath, 'utf-8'));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Refuse to unpatch VSCode from a profile that didn't enable it, because only
+   * the owning profile's colour customizations can be reverted from here.
+   *
+   * Deliberately overridable — a recorded owner can become unreachable (the
+   * profile was deleted, the VSCode data directory moved), and being unable to
+   * ever disable Vibrancy again would be worse than the stranded colours. The
+   * override is also how a stranded profile cleans up its own leftovers.
+   *
+   * @returns {Promise<boolean>} true to proceed with the uninstall
+   */
+  async function confirmUninstallFromOwningProfile() {
+    const { allowed } = evaluateUninstallOwnership({
+      ownerKey: (await readLocalConfig())?.ownerProfileKey,
+      currentProfile: getProfileIdentity(),
+    });
+    if (allowed) return true;
+
+    const disableAnyway = localize('messages.profileMismatchDisableAnyway');
+    const choice = await vscode.window.showWarningMessage(
+      localize('messages.profileMismatch'),
+      { modal: true },
+      disableAnyway,
+    );
+
+    return choice === disableAnyway;
+  }
+
+  async function setLocalConfig(state, paths, previousCustomizations) {
+    const configFilePath = await getLocalConfigPath();
+
+    // Convert undefined values in previousCustomizations to null
+    if (previousCustomizations && typeof previousCustomizations === 'object') {
+      previousCustomizations = Object.fromEntries(
+          Object.entries(previousCustomizations).map(([key, value]) => [key, value === undefined ? null : value])
+      );
+    }
+
+    if (state) {
+      const cliName = editorCliCommands[vscode.env.appName] || 'code';
+      const cliFullPath = process.platform === 'win32'
+        ? path.join(path.dirname(process.execPath), 'bin', `${cliName}.cmd`)
+        : cliName;
+      const profile = getProfileIdentity();
+      const configData = {
+        workbenchHtmlPath: paths.workbenchHtmlPath,
+        jsPath: paths.jsPath,
+        electronJsPath: paths.electronJsPath,
+        // The *current profile's* settings.json, not the default profile's —
+        // this is the file whose colour customizations the hook has to revert.
+        settingsJsonPath: getCurrentSettingsPath(),
+        cliCommand: require('fs').existsSync(cliFullPath) ? cliFullPath : cliName,
+        previousCustomizations,
+        // Which profile's settings hold the colour customizations this install
+        // wrote, so Disable can refuse to run from a profile that can't revert
+        // them. Installing always claims ownership.
+        ownerProfileKey: profile?.key ?? null,
+        ownerProfileHint: profile?.hint ?? null,
+      };
+      // NixOS mirror bookkeeping so the uninstall hook can clean up the
+      // shadow install ($HOME mirror + desktop entry) too
+      if (usingMirror || launchedFromMirror) {
+        configData.nixMirrorBase = nixMirror.mirrorBase();
+        configData.nixDesktopEntry = nixMirror.desktopEntryPath();
+      }
+      await fs.writeFile(configFilePath, JSON.stringify(configData, null, 2), 'utf-8');
+    } else {
+        await fs.unlink(configFilePath).catch(() => { });
+    }
+  }
+
+
+  // ####  main commands ######################################################
+
+  /**
+   * Check if elevation is needed and prompt the user for permission.
+   * Returns the resolved elevation state (true/false), or null if the user
+   * cancelled or the operation should be aborted (e.g. Snap).
+   */
+  async function resolveElevation(forceElevation) {
+    if (testMode) return false;
+    // In mirror mode all writes land under $HOME — never elevate. The probe
+    // must not run against installPaths.appDir either: the mirror may not exist yet
+    // at this point (it's created by ensureMirrorIfNeeded during the op).
+    if (usingMirror) return false;
+    let needsElevation = forceElevation || checkNeedsElevation(appDir);
+
+    if (needsElevation === 'snap') {
+      vscode.window.showErrorMessage(localize('messages.snapImmutable'));
+      return null;
+    }
+
+    if (needsElevation === 'immutable') {
+      vscode.window.showErrorMessage(localize('messages.immutableUnsupported'));
+      return null;
+    }
+
+    // 'nix' only appears here when store-root derivation failed at activation
+    // (usingMirror would otherwise be set) — treat it as unsupported.
+    if (needsElevation === 'nix') {
+      vscode.window.showErrorMessage(localize('messages.immutableUnsupported'));
+      return null;
+    }
+
+    if (needsElevation) {
+      // Check if elevation is even possible before prompting the user
+      if (process.platform === 'linux' && hasNoNewPrivs()) {
+        vscode.window.showErrorMessage(localize('messages.noNewPrivs'));
+        return null;
+      }
+
+      const choice = await vscode.window.showWarningMessage(
+        localize('messages.elevationRequired'),
+        { title: localize('messages.elevationYes') },
+        { title: localize('messages.elevationNo') }
+      );
+      if (!choice || choice.title === localize('messages.elevationNo')) {
+        return null;
+      }
+    }
+
+    return needsElevation;
+  }
+
+  function handleElevationError(error, retryFn) {
+    // In test mode there is no UI to drive a retry — surface the failure to
+    // the harness instead of letting the operation resolve as a success.
+    if (testMode) {
+      writeTestSignal('error', String(error && error.stack || error));
+      return;
+    }
+    if (error && error.message === 'cancelled') {
+      // User dismissed the authentication prompt — nothing to report.
+      return;
+    }
+    if (error && error.message === 'no_new_privs') {
+      vscode.window.showErrorMessage(localize('messages.noNewPrivs'));
+    } else if (error && (error.code === 'EPERM' || error.code === 'EACCES')) {
+      vscode.window.showErrorMessage(
+        localize('messages.admin') + error + ". Click here for more info: [Known Errors](https://github.com/illixion/vscode-vibrancy-continued/blob/main/docs/known-errors.md)",
+        { title: localize('messages.retryElevated') }
+      ).then(retryChoice => {
+        if (retryChoice) retryFn();
+      });
+    } else if (error && error.message && error.message.includes('no_elevation_method')) {
+      vscode.window.showErrorMessage(localize('messages.noElevationMethod') + appDir);
+    } else if (error && error.message && error.message.includes('Elevation failed')) {
+      vscode.window.showErrorMessage(localize('messages.elevationFailed') + error.message + ". Click here for more info: [Known Errors](https://github.com/illixion/vscode-vibrancy-continued/blob/main/docs/known-errors.md)");
+    } else {
+      vscode.window.showErrorMessage(localize('messages.smthingwrong') + error + ". Click here for more info: [Known Errors](https://github.com/illixion/vscode-vibrancy-continued/blob/main/docs/known-errors.md)");
+    }
+  }
+
+  async function applyPostInstallSettings() {
+    await migrateRenamedSettings();
+    await checkColorTheme(testMode);
+    await checkElectronDeprecatedType();
+    await setLocalConfig(true, {
+      workbenchHtmlPath: HTMLFile,
+      jsPath: JSFile,
+      electronJsPath: ElectronJSFile,
+    }, await changeVSCodeSettings());
+
+    // Every successful enable and update funnels through here, which is what
+    // this needs: the people the profile tip is written for are existing users
+    // upgrading, and they never call Enable. It used to sit in Install() behind
+    // an `if (!sharedWriter)` guard copied from the ownership-takeover warning
+    // above it — but Update() always passes a shared writer, so the one
+    // population that needed the tip was the only one that never saw it.
+    //
+    // Here also means it only fires after the install has actually succeeded;
+    // in Install() it ran before the file work, so a failed install announced
+    // profile advice anyway. Not awaited: it reads other profiles' settings off
+    // disk, and a slow or unreadable file must not hold up the install.
+    showProfileTip();
+
+    // In mirror mode the enable flow never goes through promptRestart (the
+    // user relaunches via the desktop entry instead of the Restart button),
+    // so the custom window controls needed over a transparent window must be
+    // set for the mirror to read. Writing it pops VSCode's own "restart to
+    // take effect" toast, so the non-test flow defers the write until the
+    // user has acknowledged the relaunch modal (see enabledRestart) — here
+    // it's only written directly when there's no UI to sequence around.
+    if (usingMirror && testMode) {
+      await setControlsStyleCustom();
+    }
+
+    // We just mutated vscode_vibrancy settings (migration + theme sync). Those
+    // writes emit onDidChangeConfiguration events that can be delivered AFTER
+    // the operation guard (operationInProgress) clears, so refresh the change
+    // -detection baseline now — while we're still in the operation — to stop
+    // them being mistaken for a user edit and popping the "config changed,
+    // reload?" prompt.
+    lastConfig = vscode.workspace.getConfiguration("vscode_vibrancy");
+  }
+
+  async function Install(sharedWriter) {
+
+    if (osType === 'unknown') {
+      vscode.window.showInformationMessage(localize('messages.unsupported'));
+      throw new Error('unsupported');
+    }
+
+    // Enabling from a second profile is where the stranding gets set up: this
+    // install takes ownership, so the previous owner's colour customizations
+    // can no longer be reverted from Disable. Say so, but don't block — the
+    // effect itself is machine-wide, so wanting it configured here is
+    // reasonable. (Skipped inside Update, which re-installs in place.)
+    if (!sharedWriter && isOwnershipTakeover({
+      ownerKey: (await readLocalConfig())?.ownerProfileKey,
+      currentProfile: getProfileIdentity(),
+    })) {
+      vscode.window.showWarningMessage(localize('messages.profileTakeover'));
+    }
+
+    // BUG: prevent installation on macOS with Electron 32.2.6 used in VSCode 1.96 (#178)
+    if (process.versions.electron === "32.2.6" && process.platform === 'darwin') {
+      vscode.window.showErrorMessage("Vibrancy doesn't work with this version of VSCode, see [here](https://github.com/illixion/vscode-vibrancy-continued/issues/178) for more info.");
+      throw new Error('unsupported');
+    }
+
+    // Use shared writer if provided (e.g. from Update), otherwise create our own
+    let writer = sharedWriter;
+    if (!writer) {
+      const needsElevation = await resolveElevation(false);
+      if (needsElevation === null) return;
+      writer = new StagedFileWriter(needsElevation);
+      await writer.init();
+    }
+
+    try {
+      await ensureMirrorIfNeeded();
+      await fs.stat(JSFile);
+      await fs.stat(HTMLFile);
+
+      if (osType === 'win10') {
+        await installRuntimeWin(writer);
+      } else {
+        await installRuntime(writer);
+      }
+      if (ElectronJSFile === JSFile) {
+        // VSCode 1.95+ merges the Electron main and workbench main into one
+        // main.js, so both patches have to land on a single in-memory copy.
+        // An elevated writer stages its writes to temp files, so re-reading
+        // the file here would return the pristine original and silently drop
+        // the window options — leaving a patched but non-transparent window.
+        // uninstallJS does the same for teardown.
+        const patchedElectronJS = await modifyElectronJSFile(ElectronJSFile, null);
+        await installJS(writer, patchedElectronJS);
+      } else {
+        await modifyElectronJSFile(ElectronJSFile, writer);
+        await installJS(writer);
+      }
+      await installHTML(writer);
+
+      // Flush if we own the writer (not shared). Shared writer is flushed by caller.
+      if (!sharedWriter) {
+        await writer.flush();
+        // Apply VSCode settings and local config after flush succeeds
+        await applyPostInstallSettings();
+        enabledRestart();
+      }
+    } catch (error) {
+      if (!sharedWriter) writer.cleanup();
+      // Re-throw when using shared writer so the caller (Update) can handle it
+      if (sharedWriter) throw error;
+      handleElevationError(error, async () => {
+        const elevatedWriter = new StagedFileWriter(true);
+        await elevatedWriter.init();
+        try {
+          await Install(elevatedWriter);
+          await elevatedWriter.flush();
+          await applyPostInstallSettings();
+          enabledRestart();
+        } catch (retryError) {
+          elevatedWriter.cleanup();
+          handleElevationError(retryError, () => {});
+        }
+      });
+    }
+  }
+
+  async function removeControlsStyle() {
+    try {
+      await vscode.workspace.getConfiguration().update("window.controlsStyle", undefined, vscode.ConfigurationTarget.Global);
+    } catch {
+      // Setting not supported on this VSCode version — nothing to remove
+    }
+  }
+
+  async function setControlsStyleCustom() {
+    const controlsStyle = resolveWindowControlsStyle({
+      platform: process.platform,
+      windowControlsStyle: vscode.workspace.getConfiguration("vscode_vibrancy").get("windowControlsStyle"),
+    });
+    if (!controlsStyle) return;
+    try {
+      await vscode.workspace.getConfiguration().update("window.controlsStyle", controlsStyle, vscode.ConfigurationTarget.Global);
+    } catch {
+      // window.controlsStyle is not supported in this version of VSCode
+    }
+  }
+
+  async function Uninstall(promptRestart = true, sharedWriter) {
+    if (!sharedWriter) {
+      // Check before touching anything: unpatching is machine-wide, but only
+      // this profile's colour customizations can be reverted from here.
+      if (!await confirmUninstallFromOwningProfile()) return;
+    }
+
+    // Standalone disable when the mirror was never created: nothing to
+    // revert — just clean up any leftover shadow-install artifacts.
+    if (usingMirror && !sharedWriter && !require('fs').existsSync(installPaths.appDir)) {
+      await nixMirror.removeDesktopEntry();
+      await nixMirror.removeAllMirrors();
+      await removeControlsStyle();
+      await restorePreviousSettings();
+      await setLocalConfig(false);
+      if (promptRestart) {
+        disabledRestart();
+      }
+      return;
+    }
+
+    // Use shared writer if provided (e.g. from Update), otherwise create our own
+    let writer = sharedWriter;
+    if (!writer) {
+      const needsElevation = await resolveElevation(false);
+      if (needsElevation === null) return;
+      writer = new StagedFileWriter(needsElevation);
+      await writer.init();
+    }
+
+    try {
+      // uninstall old version
+      await fs.stat(HTMLFile);
+      await uninstallHTML(writer);
+
+      await fs.stat(JSFile);
+      await uninstallJS(writer);
+
+      // Flush if we own the writer (not shared). Shared writer is flushed by caller.
+      if (!sharedWriter) {
+        await writer.flush();
+
+        // Revert the colour customizations only now that the files really are
+        // unpatched. Doing it up front meant every abandoned uninstall — a
+        // declined elevation prompt, a failed write, a declined elevated retry
+        // — left VSCode still patched with its vibrancy colours already gone:
+        // a visibly broken editor, with no hint that re-running Disable is the
+        // fix. (Update passes a shared writer and skips this entirely; it
+        // re-installs in place, so there is nothing to revert.)
+        await restorePreviousSettings();
+        await setLocalConfig(false);
+
+        // Standalone disable removes the whole shadow install: the mirror
+        // and its desktop entry. A running mirror instance keeps working
+        // (open files stay mapped); the next launch uses the store VSCode.
+        if (nixMirror && (usingMirror || launchedFromMirror)) {
+          await nixMirror.removeDesktopEntry();
+          await nixMirror.removeAllMirrors();
+          // Set at install time in mirror mode, so unset here rather than
+          // relying on the user clicking through promptRestart
+          await removeControlsStyle();
+        }
+
+        if (promptRestart) {
+          disabledRestart();
+        }
+      }
+    } catch (error) {
+      if (!sharedWriter) writer.cleanup();
+      // Re-throw when using shared writer so the caller (Update) can handle it
+      if (sharedWriter) throw error;
+      handleElevationError(error, async () => {
+        const elevatedWriter = new StagedFileWriter(true);
+        await elevatedWriter.init();
+        try {
+          await Uninstall(promptRestart, elevatedWriter);
+          await elevatedWriter.flush();
+          await restorePreviousSettings();
+          await setLocalConfig(false);
+          if (promptRestart) {
+            disabledRestart();
+          }
+        } catch (retryError) {
+          elevatedWriter.cleanup();
+          handleElevationError(retryError, () => {});
+        }
+      });
+    }
+  }
+
+  async function Update() {
+    const needsElevation = await resolveElevation(false);
+    if (needsElevation === null) return;
+
+    // Single writer for both uninstall + install — one elevation prompt
+    const writer = new StagedFileWriter(needsElevation);
+    await writer.init();
+
+    try {
+      await ensureMirrorIfNeeded();
+      await Uninstall(false, writer);
+      await Install(writer);
+      // Flush all file changes at once, then apply settings only on success
+      await writer.flush();
+      await applyPostInstallSettings();
+      enabledRestart();
+    } catch (error) {
+      writer.cleanup();
+      handleElevationError(error, async () => {
+        const elevatedWriter = new StagedFileWriter(true);
+        await elevatedWriter.init();
+        try {
+          await Uninstall(false, elevatedWriter);
+          await Install(elevatedWriter);
+          await elevatedWriter.flush();
+          await applyPostInstallSettings();
+          enabledRestart();
+        } catch (retryError) {
+          elevatedWriter.cleanup();
+          handleElevationError(retryError, () => {});
+        }
+      });
+    }
+  }
+
+  var operationInProgress = false;
+
+  async function runExclusive(fn) {
+    if (operationInProgress) return;
+    operationInProgress = true;
+    try {
+      await fn();
+    } finally {
+      operationInProgress = false;
+    }
+  }
+
+  // Returned rather than fired and forgotten, so VSCode knows the command is
+  // still running — and so a caller can wait for it.
+  var installVibrancy = vscode.commands.registerCommand('extension.installVibrancy', () => (
+    runExclusive(() => Install())
+  ));
+  var uninstallVibrancy = vscode.commands.registerCommand('extension.uninstallVibrancy', () => (
+    runExclusive(() => Uninstall())
+  ));
+  var updateVibrancy = vscode.commands.registerCommand('extension.updateVibrancy', () => (
+    runExclusive(() => Update())
+  ));
+
+  context.subscriptions.push(installVibrancy);
+  context.subscriptions.push(uninstallVibrancy);
+  context.subscriptions.push(updateVibrancy);
+
+  const currentVersion = context.extension.packageJSON.version;
+  let lastVersion = context.globalState.get('lastVersion');
+  let updateMsg = "messages.updateNeeded"
+
+  // Detect first time install
+  if (!lastVersion) {
+    lastVersion = '0.0.0';
+    updateMsg = "messages.firstload"
+  }
+
+  // Check if the current version is a minor update from the last version
+  if (checkRuntimeUpdate(currentVersion, lastVersion)) {
+    if (testMode) {
+      runExclusive(() => Update()).then(() => {
+        // A swallowed operation error may have already reported failure
+        if (testSignalFailed) return;
+        // Include diagnostic info about the runtime directory
+        const runtimeFiles = require('fs').existsSync(runtimeDir)
+          ? require('fs').readdirSync(runtimeDir).join(', ')
+          : 'DIR NOT FOUND';
+        const pendingCopies = typeof pendingNodeCopies !== 'undefined' ? pendingNodeCopies.length : 0;
+        writeTestSignal('success', `Install completed. Runtime: [${runtimeFiles}]. Pending .node copies: ${pendingCopies}. appDir: ${appDir}. targetAppDir: ${installPaths.appDir}. usingMirror: ${usingMirror}`);
+      }).catch((err) => {
+        writeTestSignal('error', String(err && err.message || err));
+      });
+    } else {
+      vscode.window.showInformationMessage(localize(updateMsg), { title: localize('messages.installIde') })
+        .then(async (msg) => {
+          if (msg) {
+            await runExclusive(() => Update());
+          }
+        });
+    }
+    // Update the global state with the current version
+    context.globalState.update('lastVersion', currentVersion);
+  }
+
+  // Test harness can request an uninstall by creating a test-uninstall file
+  if (testUninstallRequested) {
+    runExclusive(() => Uninstall(false)).then(() => {
+      try { require('fs').unlinkSync(testUninstallFile); } catch {}
+      writeTestSignal('uninstalled', 'Uninstall completed');
+    }).catch((err) => {
+      writeTestSignal('error', `Uninstall failed: ${err && err.message || err}`);
+    });
+  }
+
+  // Heal a stranded macOS restart toggle: promptRestart briefly persists a
+  // flipped window.titleBarStyle to pop VSCode's built-in restart prompt, and
+  // an interruption (quit/reload mid-toggle, failed restore write) can leave
+  // the flipped value behind — hiding the window controls with no obvious
+  // user-facing fix. Restoring here re-pops VSCode's restart prompt, so one
+  // more restart puts the controls back without any manual settings surgery.
+  if (process.platform === 'darwin') {
+    const config = vscode.workspace.getConfiguration();
+    healStrandedTitleBarToggle({
+      settingsStore: {
+        inspect: (key) => config.inspect(key),
+        get: (key) => config.get(key),
+        update: (key, value) => config.update(key, value, vscode.ConfigurationTarget.Global),
+      },
+      globalState: context.globalState,
+    }).catch((err) => console.error('Vibrancy: failed to restore window.titleBarStyle:', err));
+  }
+
+  // Not awaited: it only reads and rewrites Vibrancy's own record of which
+  // settings.json to revert, and nothing in activation depends on the outcome.
+  healStaleSettingsPath()
+    .catch((err) => console.error('Vibrancy: failed to correct the recorded settings.json path:', err));
+
+  var lastConfig = vscode.workspace.getConfiguration("vscode_vibrancy");
+
+  vscode.workspace.onDidChangeConfiguration(() => {
+    if (operationInProgress) return;
+    const newConfig = vscode.workspace.getConfiguration("vscode_vibrancy");
+    if (!deepEqual(lastConfig, newConfig)) {
+      lastConfig = newConfig;
+      vscode.window.showInformationMessage(localize('messages.configupdate'), { title: localize('messages.reloadIde') })
+      .then(async (msg) => {
+          if (msg) {
+            await runExclusive(() => Update());
+          }
+        });
+      context.globalState.update('lastVersion', currentVersion);
+      }
+  });
+
+  checkDarkLightMode(vscode.window.activeColorTheme)
+  vscode.window.onDidChangeActiveColorTheme((theme) => {
+    checkDarkLightMode(theme)
+  });
+
+  // NixOS staleness check: when running from a mirror, a nixos-rebuild may
+  // have moved the system VSCode to a new store path. Offer to rebuild the
+  // mirror from the new package and re-apply vibrancy.
+  if (launchedFromMirror && !testMode) {
+    try {
+      const cliName = editorCliCommands[vscode.env.appName] || 'code';
+      const stale = nixMirror.checkMirrorStale(appDir, cliName);
+      if (stale) {
+        vscode.window.showWarningMessage(
+          localize('messages.nixStale'),
+          { title: localize('messages.nixStaleReenable') }
+        ).then(async (msg) => {
+          if (!msg) return;
+          await runExclusive(async () => {
+            retargetToMirror(stale.newStoreRoot, appDir);
+            mirrorReady = false;
+            await Update();
+          });
+        });
+      }
+    } catch (err) {
+      console.error('Vibrancy: mirror staleness check failed:', err);
+    }
+  }
+}
+exports.activate = activate;
+
+// this method is called when your extension is deactivated
+function deactivate() { }
+exports.deactivate = deactivate;
+
+// Exported for testing
+exports._test = { getCurrentTheme, getEditorSettingsPath };

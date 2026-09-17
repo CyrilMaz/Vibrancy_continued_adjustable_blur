@@ -1,0 +1,87 @@
+.monaco-workbench {
+    --cursor-bg-elevated: var(--semi-opaque) !important;
+}
+
+.ui-menu,
+.ui-tooltip {
+    backdrop-filter: blur(10px) !important;
+}
+
+.monaco-workbench .part.auxiliarybar .composer-bar.editor,
+.monaco-workbench .part.auxiliarybar .composer-bar .conversations,
+.monaco-workbench .part.auxiliarybar .composer-bar .composer-rendered-message,
+.monaco-workbench .part.auxiliarybar .composer-bar .composer-pane-controls-feedback {
+    background: transparent !important;
+}
+
+.monaco-workbench .part.auxiliarybar.basepanel {
+    border: none !important;
+}
+
+.monaco-workbench .part.auxiliarybar .full-input-box {
+    background-color: var(--semi-opaque) !important;
+    transition:
+        background-color 0.15s ease-out,
+        border-color 0.15s ease-out,
+        box-shadow 0.3s ease-out !important;
+}
+
+.open-agents-window-button {
+    background-color: rgba(105, 182, 237, 0.3) !important;
+    font-size: 10.5px !important;
+    border-radius: var(--corner) !important;
+}
+
+.open-agents-window-button:hover {
+    background-color: rgba(105, 182, 237, 0.5) !important;
+}
+
+.monaco-workbench .part.auxiliarybar .full-input-box:focus-within {
+    background-color: var(--semi-opaque-secondary) !important;
+    border-color: rgba(105, 182, 237, 0.45) !important;
+    box-shadow: 0 0 5px 3px rgba(105, 182, 237, 0.3) !important;
+}
+
+.monaco-workbench .part.auxiliarybar .composer-bar .ui-tool-call-card {
+    background-color: var(--semi-opaque-tertiary) !important;
+}
+
+.monaco-workbench .part.auxiliarybar .composer-bar .ui-code-block {
+    background-color: var(--semi-opaque) !important;
+}
+
+.monaco-workbench .part.panel.bottom .title .monaco-action-bar .action-item:not(.checked) .action-label,
+.monaco-workbench .part.auxiliarybar.basepanel .title .monaco-action-bar .action-item:not(.checked) .action-label {
+    color: var(--semi-opaque-text) !important;
+}
+
+.monaco-workbench .part.panel.bottom .title .monaco-action-bar .action-item:not(.checked) .action-label:hover,
+.monaco-workbench
+    .part.auxiliarybar.basepanel
+    .title
+    .monaco-action-bar
+    .action-item:not(.checked)
+    .action-label:hover {
+    color: var(--semi-opaque-text-secondary) !important;
+}
+
+.monaco-workbench .sidebar > div > div > div:not(.sidebar2-compositeComponent) > div {
+    width: calc(100% - calc(var(--border) * 2)) !important;
+    margin-left: var(--border) !important;
+    border-radius: var(--corner) !important;
+    border: none !important;
+    background-color: var(--semi-opaque) !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+.monaco-workbench .sidebar > div > div > div:not(.sidebar2-compositeComponent) > div > div:nth-child(2) {
+    .sidebar-list-item-selected,
+    .sidebar-list-item:hover {
+        border-radius: var(--corner) !important;
+    }
+}
+
+.anysphere-icon-button {
+    --vscode-panel-background: var(--semi-opaque) !important;
+    --vscode-editor-background: var(--semi-opaque-tertiary) !important;
+}

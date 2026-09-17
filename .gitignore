@@ -1,0 +1,9 @@
+node_modules
+.vscode
+test/screenshots
+.vsixmanifest
+firstload.lock
+*.vsix
+yarn.lock
+/build
+native/prebuilt/*.node

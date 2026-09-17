@@ -1,0 +1,112 @@
+name: Publish Extension
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Mark this version as a pre-release"
+        type: boolean
+        default: false
+      package_only:
+        description: "Only build and package (skip publish)"
+        type: boolean
+        default: false
+
+# Least-privilege default for GITHUB_TOKEN. Only the publish job needs write
+# access (it uploads the GitHub release); it sets contents: write at job level.
+permissions:
+  contents: read
+
+jobs:
+  build-native:
+    runs-on: ${{ matrix.os }}
+    # Explicit caps so a stalled network step can't ride GitHub's 6h ceiling —
+    # the Tests workflow lost a full runner-day to exactly that (run 32232380930).
+    # Baseline for this job: ~3-4m.
+    timeout-minutes: 30
+    strategy:
+      # Don't cancel the other arch when one fails — we want to see both results.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install node-addon-api
+        run: npm install node-addon-api
+      - name: Rename binding.gyp.dist to binding.gyp
+        run: mv binding.gyp.dist binding.gyp
+        shell: bash
+      # The windows-2025 image ships Visual Studio 2026, which only node-gyp
+      # >=12.1.0 can detect (nodejs/node-gyp#3282). Run it via npx to guarantee
+      # that version regardless of the node-gyp bundled with the runner's npm.
+      - name: Build native modules
+        run: npx -y node-gyp@latest rebuild
+      - name: Copy build output to native/prebuilt
+        run: |
+          mkdir -p native/prebuilt
+          cp build/Release/vibrancy.node native/prebuilt/vibrancy-${{ matrix.arch }}.node
+        shell: bash
+      - name: Upload native modules
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.arch }}
+          path: native/prebuilt/
+
+  publish:
+    needs: build-native
+    runs-on: ubuntu-latest
+    # Baseline ~2-3m. Deliberately not generous: this job pushes to the
+    # Marketplace and Open VSX, so a wedged upload should surface fast.
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Download native modules (x64)
+        uses: actions/download-artifact@v8
+        with:
+          name: native-x64
+          path: native/prebuilt/
+      - name: Download native modules (arm64)
+        uses: actions/download-artifact@v8
+        with:
+          name: native-arm64
+          path: native/prebuilt/
+      - name: Install dependencies
+        run: npm install --omit=dev
+      - name: Read version from package.json
+        id: version
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+      - name: Package extension
+        run: npx @vscode/vsce package ${{ inputs.prerelease && '--pre-release' || '' }}
+      - name: Upload VSIX package as artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: vscode-vibrancy-continued-v${{ steps.version.outputs.version }}
+          path: "*.vsix"
+      - name: Publish extension to VSCE
+        if: ${{ !inputs.package_only }}
+        run: npx @vscode/vsce publish -p ${{ secrets.VSCE_TOKEN }} --packagePath *.vsix ${{ inputs.prerelease && '--pre-release' || '' }}
+      - name: Publish extension to Open VSX
+        if: ${{ !inputs.package_only }}
+        env:
+          OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
+        run: npx ovsx publish -p $OPEN_VSX_TOKEN --packagePath *.vsix ${{ inputs.prerelease && '--pre-release' || '' }}
+      - name: Upload VSIX to GitHub Release and publish
+        if: ${{ !inputs.package_only }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "v${{ steps.version.outputs.version }}" *.vsix --clobber
+          gh release edit "v${{ steps.version.outputs.version }}" --draft=false

@@ -1,0 +1,338 @@
+name: Tests
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+  schedule:
+    # Daily at 08:00 UTC — catches VS Code Insiders updates (released ~daily)
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      vscode_version:
+        description: 'VS Code version to test (stable, insiders, or a specific version)'
+        required: false
+        default: 'insiders'
+
+# Least-privilege default for GITHUB_TOKEN; these jobs only read the repo and
+# upload/download workflow artifacts (which don't need write scopes).
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    # Every job here carries an explicit cap. Without one, GitHub's only limit
+    # is its 6h hard ceiling — which a stalled apt mirror actually reached (see
+    # "Install desktop tools" below), burning a full runner-day before anyone
+    # noticed.
+    #
+    # Two layers, deliberately ordered: individual steps carry the tight caps
+    # (they fail loudly, naming the step that stalled), and the job cap is the
+    # outer net for the steps left unbounded — checkout, setup-node,
+    # upload-artifact. So each job cap sits just above the sum of its step caps,
+    # letting a step timeout win the race and keep the log legible; a job-level
+    # cancellation reports only "cancelled", which is what made the original
+    # incident so opaque. Baseline for this job: ~15s.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      # Use `npm ci`, not `npm install`: the latter re-resolves the dependency
+      # tree and intermittently prunes platform-specific optional deps (npm bug
+      # npm/cli#4828), which on Linux drops @rolldown/binding-linux-x64-gnu and
+      # makes vitest fail to start. `npm ci` installs strictly from the lockfile.
+      - run: npm ci
+        timeout-minutes: 10
+      - run: npm test
+        timeout-minutes: 10
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vitest-report
+          path: test-results/vitest-report.xml
+
+  e2e-tests:
+    runs-on: ${{ matrix.os }}
+    # Baseline worst case is windows-latest at ~7m. The cap clears the longest
+    # per-OS chain of step caps below (Windows: 10+10+20+25 = 65m is the extreme
+    # where every step exhausts its own budget) closely enough to stay a real
+    # backstop while letting those step caps fire first. See `tests` above.
+    timeout-minutes: 70
+    env:
+      # Scheduled runs test against Insiders to catch breaking changes early.
+      # Manual dispatch uses the chosen version. Push/PR runs use stable.
+      VSCODE_VERSION: ${{ (github.event_name == 'schedule' && 'insiders') || (github.event_name == 'workflow_dispatch' && inputs.vscode_version) || 'stable' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # To use self-hosted runners with a real desktop for reliable screenshots,
+        # replace entries with your self-hosted labels, e.g.:
+        #   os: [self-hosted-linux, self-hosted-macos, self-hosted-windows]
+        # Self-hosted runners need: Node.js 20+, git, and a desktop session.
+        # On Linux self-hosted: also install imagemagick, openbox, picom,
+        # hsetroot, x11-xserver-utils (see "Install desktop tools" below).
+        # Note: the E2E test changes the desktop wallpaper to solid green
+        # while running (restored afterwards on macOS/Windows).
+        # windows-11-arm is build-only — it compiles the arm64 native module
+        # but skips the E2E run; see "Run E2E tests (Windows)" for why.
+        os: [ubuntu-latest, macos-26, windows-latest, windows-11-arm]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm install
+        timeout-minutes: 10
+      # --save-dev so these tools land in devDependencies, not dependencies.
+      # `npm install <pkg>` defaults to --save (dependencies), which would make
+      # vsce a production dep and bundle its whole tree into the packaged vsix.
+      - run: npm install --save-dev @vscode/test-electron @vscode/vsce
+        timeout-minutes: 10
+      - name: Build native modules (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 20
+        run: |
+          npm install node-addon-api
+          mv binding.gyp.dist binding.gyp
+          npx -y node-gyp@latest rebuild
+          mkdir -p native/prebuilt
+          cp build/Release/vibrancy.node native/prebuilt/vibrancy-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}.node
+          mv binding.gyp binding.gyp.dist
+        shell: bash
+      # Reuse this freshly-compiled binary for the packaged vsix instead of
+      # rebuilding it in a separate job.
+      - name: Upload native module
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: prebuilt-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+          path: native/prebuilt/vibrancy-${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}.node
+      # imagemagick: screenshots. openbox/picom/hsetroot/x11-xserver-utils:
+      # window manager, compositor, and green root wallpaper — required for the
+      # true-transparency check (X11 shows nothing through a transparent window
+      # without a compositing manager; run-e2e.js starts them itself).
+      #
+      # Every apt call is wrapped in `timeout(1)` because this exact step once
+      # wedged for six straight hours (run 32232380930): azure.archive.ubuntu.com
+      # went dark, apt fell back to archive.ubuntu.com, stalled mid-fetch of
+      # `noble-security InRelease`, and never printed another line. apt's own
+      # Acquire::*::Timeout did not fire — it only bounds a fully idle socket,
+      # so a mirror trickling bytes keeps apt alive indefinitely. With no
+      # timeout anywhere in this workflow the job ran to GitHub's 6h hard cap.
+      # An external wall-clock kill is the one guard apt cannot defeat.
+      #
+      # `timeout` runs *under* sudo, not the other way round: `timeout sudo ...`
+      # would signal sudo and can leave a root-owned apt orphaned holding the
+      # dpkg lock, which then poisons every retry.
+      #
+      # These tools are mandatory, not decorative — without a compositor and a
+      # green root window the transparency assertion silently checks nothing.
+      # So a mirror outage fails the job loudly rather than skipping ahead.
+      - name: Install desktop tools (Linux)
+        if: runner.os == 'Linux'
+        # Worst case with all retries and backoff exhausted is ~15m; the cap is
+        # a backstop for the unlikely case that `timeout` itself is outlived.
+        timeout-minutes: 16
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Retries/timeouts for the fetches apt does manage to bound itself.
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+
+          # run_apt <description> <attempts> <per-attempt-limit> <command...>
+          run_apt() {
+            local desc=$1 attempts=$2 limit=$3
+            shift 3
+            local rc attempt
+            for (( attempt = 1; attempt <= attempts; attempt++ )); do
+              echo "::group::$desc (attempt $attempt/$attempts, limit $limit)"
+              rc=0
+              sudo timeout --kill-after=30s "$limit" "$@" || rc=$?
+              echo "::endgroup::"
+              if [[ $rc -eq 0 ]]; then
+                echo "$desc succeeded on attempt $attempt/$attempts."
+                return 0
+              fi
+              # 124 = SIGTERM'd at the limit, 137 = needed the SIGKILL follow-up.
+              if [[ $rc -eq 124 || $rc -eq 137 ]]; then
+                echo "$desc hit its $limit wall-clock limit (attempt $attempt/$attempts) — the mirror is stalled, not merely slow."
+              else
+                echo "$desc exited $rc (attempt $attempt/$attempts)."
+              fi
+              if [[ $attempt -lt $attempts ]]; then
+                # A killed apt can leave the dpkg lock held or a package
+                # half-configured; clear that so the retry isn't doomed too.
+                sudo timeout 60s dpkg --configure -a || true
+                sleep $(( attempt * 15 ))
+              fi
+            done
+            echo "::error::$desc failed after $attempts attempts — failing fast instead of hanging the runner."
+            return 1
+          }
+
+          run_apt 'apt-get update' 3 120s apt-get update "${apt_opts[@]}"
+          run_apt 'apt-get install' 2 240s apt-get install -y "${apt_opts[@]}" \
+            imagemagick openbox picom hsetroot x11-xserver-utils
+      - name: Run E2E tests (Linux)
+        if: runner.os == 'Linux'
+        # Baseline ~3m.
+        timeout-minutes: 20
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24 +extension COMPOSITE +extension RENDER" npm run test:e2e
+      - name: Run E2E tests (macOS)
+        if: runner.os == 'macOS'
+        # Baseline ~3m.
+        timeout-minutes: 20
+        run: npm run test:e2e
+      # windows-11-arm builds and uploads the arm64 native module (the package
+      # job needs that artifact) but does not run the E2E tests: its runner
+      # image boots into the Windows OOBE "Choose privacy settings" wizard,
+      # which owns the screen and can't be minimized, and leaves no initialized
+      # user desktop — SystemParametersInfo reports success but the wallpaper
+      # never paints. Verifying transparency requires capturing the screen
+      # behind the window, so there is nothing usable to capture there. (It
+      # passed historically only because the old capture used PrintWindow,
+      # which renders a window's own content and never sees what covers it.)
+      - name: Run E2E tests (Windows)
+        if: runner.os == 'Windows' && matrix.os != 'windows-11-arm'
+        # Baseline ~5-7m; Windows is consistently the slowest runner here.
+        timeout-minutes: 25
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: screenshots-${{ matrix.os }}
+          path: test/screenshots/
+          if-no-files-found: ignore
+
+  # Assemble the vsix with both freshly-compiled native modules bundled in.
+  # The e2e matrix builds and tests on both Windows x64 and arm64, uploading
+  # each compiled vibrancy.node as a `prebuilt-<arch>` artifact for this job.
+  package:
+    needs: [e2e-tests]
+    runs-on: ubuntu-latest
+    # Baseline ~25s.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm ci
+      # Overwrite the committed prebuilt binaries with the ones compiled in this
+      # run. download-artifact merges all `prebuilt-*` artifacts into one dir.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: prebuilt-*
+          merge-multiple: true
+          path: native/prebuilt/
+      # Run vsce via npx (resolved from the npm cache, NOT installed into
+      # node_modules/dependencies) so it doesn't bundle its own dependency tree
+      # into the vsix. vsce prunes devDependencies from the package itself.
+      - name: Package vsix
+        run: npx @vscode/vsce package --out vscode-vibrancy-continued.vsix
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vsix
+          path: vscode-vibrancy-continued.vsix
+          if-no-files-found: error
+
+  ci:
+    if: always()
+    needs: [tests, e2e-tests]
+    runs-on: ubuntu-latest
+    # Baseline ~10s.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        if: always()
+        with:
+          name: vitest-report
+          path: test-results/
+      - uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
+        if: always()
+        with:
+          name: Vitest Results
+          path: test-results/vitest-report.xml
+          reporter: java-junit
+          list-tests: all
+          list-suites: all
+      # A silent alerting failure is worse than a noisy one: the 6h timeout in
+      # run 32232380930 went unnoticed for ten hours because this step got
+      # HTTP 401 (revoked bot token) and only reported `exit code 22`. So it now
+      # names the cause, retries transient errors, and never exits 0 on failure.
+      - name: Notify Telegram on failure
+        if: needs.tests.result != 'success' || needs.e2e-tests.result != 'success'
+        timeout-minutes: 5
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          BRANCH: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+          E2E_RESULT: ${{ needs.e2e-tests.result }}
+        run: |
+          set -uo pipefail
+          if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
+            echo "::error::Tests failed but TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID are not configured, so nobody was alerted. Set both repository secrets."
+            exit 1
+          fi
+          # `cancelled` is what a job that blew its timeout reports, so call it
+          # out by name rather than leaving a bare status the reader must decode.
+          note=''
+          if [[ "$TESTS_RESULT" == 'cancelled' || "$E2E_RESULT" == 'cancelled' ]]; then
+            note=$'\n(a cancelled job usually means it exceeded its timeout)'
+          fi
+          MESSAGE=$'\xE2\x9D\x8C Tests failed in '"$REPO"$'\nBranch: '"$BRANCH"$'\nEvent: '"$EVENT"$'\nUnit: '"$TESTS_RESULT"$'\nE2E: '"$E2E_RESULT""$note"$'\nRun: '"$SERVER_URL/$REPO/actions/runs/$RUN_ID"
+          body="$RUNNER_TEMP/telegram-response.json"
+          for attempt in 1 2 3; do
+            # Truncate first: a connection-level failure can leave the previous
+            # attempt's body in place, which would be reported as this one's.
+            : > "$body"
+            code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 30 \
+              -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+              --data-urlencode "text=${MESSAGE}" \
+              --data-urlencode "disable_web_page_preview=true") || code='000'
+            if [[ "$code" == '200' ]]; then
+              echo "Telegram notification delivered on attempt $attempt."
+              exit 0
+            fi
+            # Telegram's error body carries no credentials, and Actions masks
+            # the token anyway, so it is safe to surface verbatim.
+            echo "Attempt $attempt/3 failed (HTTP $code): $(cat "$body" 2>/dev/null)"
+            case "$code" in
+              401|403|404)
+                echo "::error::Telegram rejected the credentials (HTTP $code) — TELEGRAM_BOT_TOKEN is invalid or revoked, or the bot is no longer in chat $TELEGRAM_CHAT_ID. Rotate the secret: until then every CI failure goes unannounced."
+                exit 1
+                ;;
+            esac
+            if [[ $attempt -lt 3 ]]; then
+              sleep $(( attempt * 5 ))
+            fi
+          done
+          echo "::error::Telegram notification failed after 3 attempts (last HTTP $code). This CI failure went unannounced."
+          exit 1
+      # `if: always()` matters: without it, a failing notify step above skips
+      # this one, and the run's authoritative pass/fail verdict never executes.
+      # That is exactly what happened in run 32232380930.
+      - name: Report aggregate result
+        if: always()
+        env:
+          TESTS_RESULT: ${{ needs.tests.result }}
+          E2E_RESULT: ${{ needs.e2e-tests.result }}
+        run: |
+          echo "Unit tests: $TESTS_RESULT"
+          echo "E2E tests: $E2E_RESULT"
+          if [[ "$TESTS_RESULT" != 'success' || "$E2E_RESULT" != 'success' ]]; then
+            echo "::error::One or more test jobs did not succeed (unit=$TESTS_RESULT, e2e=$E2E_RESULT)."
+            exit 1
+          fi
+          echo "All test jobs succeeded."

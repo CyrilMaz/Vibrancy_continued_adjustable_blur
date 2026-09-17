@@ -1,0 +1,740 @@
+var { pathToFileURL } = require('url');
+var path = require('path');
+var os = require('os');
+
+// --- Utility Functions ---
+
+function deepEqual(obj1, obj2) {
+  if (obj1 === obj2) return true;
+  if (isPrimitive(obj1) && isPrimitive(obj2)) return obj1 === obj2;
+  if (Object.keys(obj1).length !== Object.keys(obj2).length) return false;
+  for (const key in obj1) {
+    if (!(key in obj2)) return false;
+    if (!deepEqual(obj1[key], obj2[key])) return false;
+  }
+  return true;
+}
+
+function isPrimitive(obj) {
+  return (obj !== Object(obj));
+}
+
+function checkRuntimeUpdate(current, last) {
+  const [currentMajor, currentMinor] = current.split('.').slice(0, 2);
+  const [lastMajor, lastMinor] = last.split('.').slice(0, 2);
+  return (parseInt(currentMajor) !== parseInt(lastMajor)) || (parseInt(currentMinor) !== parseInt(lastMinor));
+}
+
+function getConfigDir(name) {
+  const homedir = os.homedir();
+  if (process.platform === 'darwin') {
+    return path.join(homedir, 'Library', 'Preferences', name);
+  }
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(homedir, 'AppData', 'Roaming'), name, 'Config');
+  }
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(homedir, '.config'), name);
+}
+
+// --- Markers ---
+
+const VIBRANCY_START = '/* !! VSCODE-VIBRANCY-START !! */';
+const VIBRANCY_END = '/* !! VSCODE-VIBRANCY-END !! */';
+const MARKER_REGEX = /\n\/\* !! VSCODE-VIBRANCY-START !! \*\/[\s\S]*?\/\* !! VSCODE-VIBRANCY-END !! \*\//;
+
+// --- JS Injection ---
+
+/**
+ * Inject vibrancy runtime markers into VSCode's main.js.
+ * @param {string} js - Original main.js content
+ * @param {string} base - Base directory path for existence check
+ * @param {object} injectData - Data to inject as global.vscode_vibrancy_plugin
+ * @param {string} runtimePath - Absolute path to the runtime entry file (index.mjs or index.cjs)
+ * @returns {string} Modified JS content
+ */
+function generateNewJS(js, base, injectData, runtimePath) {
+  // Remove existing injection if present
+  const cleaned = js.replace(MARKER_REGEX, '');
+
+  return cleaned
+    + `\n${VIBRANCY_START}\n;(function(){\n`
+    + `if (!import('fs').then(fs => fs.existsSync(${JSON.stringify(base)}))) return;\n`
+    + `global.vscode_vibrancy_plugin = ${JSON.stringify(injectData)}; try{ import("${pathToFileURL(runtimePath)}"); } catch (err) {console.error(err)}\n`
+    + `})()\n${VIBRANCY_END}`;
+}
+
+/**
+ * Remove vibrancy runtime markers from JS content.
+ * @param {string} js - JS content potentially containing markers
+ * @returns {{ result: string, hadMarkers: boolean }}
+ */
+function removeJSMarkers(js) {
+  const hadMarkers = MARKER_REGEX.test(js);
+  return {
+    result: js.replace(MARKER_REGEX, ''),
+    hadMarkers,
+  };
+}
+
+// --- Electron BrowserWindow Options ---
+
+/**
+ * Inject options before the `experimentalDarkMode` anchor used by bundled
+ * VSCode BrowserWindow object literals.
+ * @param {string} electronJS - Electron main.js content
+ * @param {string} injectedOptions - Comma-delimited options to prepend
+ * @returns {string} Patched content, or the original string if no anchor exists
+ */
+function injectObjectLiteralWindowOptions(electronJS, injectedOptions) {
+  return electronJS.replace(
+    /experimentalDarkMode/g,
+    `${injectedOptions},experimentalDarkMode`
+  );
+}
+
+/**
+ * Inject options before the `titleBarStyle="hidden"` assignment used by newer
+ * Cursor window builders.
+ * @param {string} electronJS - Electron main.js content
+ * @param {(target: string, quote: string) => string} createInjectedOptions
+ * @returns {string} Patched content, or the original string if no anchor exists
+ */
+function injectCursorWindowOptions(electronJS, createInjectedOptions) {
+  // The (?<![\w$]) guards on these identifier-prefixed regexes are load-bearing
+  // for performance: without one, every position inside every long word run of
+  // a minified multi-MB bundle starts a greedy identifier match that backtracks,
+  // turning a single pass into tens of seconds (see issue with 12MB bundles).
+  return electronJS.replace(
+    /(?<![\w$])([A-Za-z_$][\w$]*)\.titleBarStyle=(["'])hidden\2,/g,
+    (_, target, quote) =>
+      `${createInjectedOptions(target, quote)}${target}.titleBarStyle=${quote}hidden${quote},`
+  );
+}
+
+/**
+ * Remove assignment-style window options injected into newer Cursor bundles.
+ * @param {string} electronJS - Electron main.js content
+ * @returns {string} Cleaned content
+ */
+function removeCursorWindowOptions(electronJS) {
+  return electronJS
+    .replace(/(?<![\w$])([A-Za-z_$][\w$]*)\.frame=false,\1\.transparent=(?:true|false),/g, '')
+    .replace(/(?<![\w$])[A-Za-z_$][\w$]*\.visualEffectState=(["'])active\1,/g, '');
+}
+
+/**
+ * Inject macOS-only visual effect state into Electron window builders.
+ * @param {string} electronJS - Electron main.js content
+ * @returns {string} Patched content
+ */
+function injectVisualEffectState(electronJS) {
+  if (
+    electronJS.includes('visualEffectState:"active"') ||
+    /(?<![\w$])[A-Za-z_$][\w$]*\.visualEffectState=(["'])active\1,/.test(electronJS)
+  ) {
+    return electronJS;
+  }
+
+  const objectLiteralPatched = injectObjectLiteralWindowOptions(
+    electronJS,
+    'visualEffectState:"active"'
+  );
+  if (objectLiteralPatched !== electronJS) {
+    return objectLiteralPatched;
+  }
+
+  return injectCursorWindowOptions(
+    electronJS,
+    (target, quote) => `${target}.visualEffectState=${quote}active${quote},`
+  );
+}
+
+/**
+ * Inject frameless-window options into Electron window builders.
+ * @param {string} electronJS - Electron main.js content
+ * @returns {string} Patched content
+ */
+function injectFramelessWindow(electronJS, transparent = true) {
+  const t = transparent ? 'true' : 'false';
+  if (
+    electronJS.includes(`frame:false,transparent:${t}`) ||
+    new RegExp(`(?<![\\w$])([A-Za-z_$][\\w$]*)\\.frame=false,\\1\\.transparent=${t},`).test(electronJS)
+  ) {
+    return electronJS;
+  }
+
+  const objectLiteralPatched = injectObjectLiteralWindowOptions(
+    electronJS,
+    `frame:false,transparent:${t}`
+  );
+  if (objectLiteralPatched !== electronJS) {
+    return objectLiteralPatched;
+  }
+
+  return injectCursorWindowOptions(
+    electronJS,
+    (target) => `${target}.frame=false,${target}.transparent=${t},`
+  );
+}
+
+/**
+ * Whether a FRAMELESS window should be transparent (per-pixel alpha) in this
+ * context.
+ *
+ * macOS and Linux use a transparent window. On macOS this fixes the file-browser
+ * hover flash (issue #207) and avoids the opaque-window stale-backing "ghost"
+ * (an opaque NSWindow keeps stale pixels in regions Chromium only partially
+ * repaints; no repaint/invalidate/resize trick reliably clears it). An earlier
+ * build defaulted macOS to opaque to cut "WindowServer GPU" — but that was a
+ * misread: it was GPU *utilization %* (occupancy), not power. Measured on both
+ * an M2 Max and a 2019 Intel (Iris Plus 655), the actual power delta between
+ * transparent and opaque is negligible (tens of mW; the GPU sits ~98% idle when
+ * static), so opaque bought no real battery saving while introducing the ghost.
+ *
+ * Windows is the exception: a transparent (layered) window can't Aero-Snap or
+ * maximize, so it uses an opaque window where vibrancy still shows via the DWM
+ * material / legacy accent on the HWND. Older Windows builds stay transparent
+ * because opaque vibrancy rendered sheared/unreadable text there (issue #122);
+ * `winOpaqueSafe` is true only on a build confirmed to render opaque correctly.
+ * The see-through 'transparent' vibrancy type always needs a transparent window.
+ *
+ * @param {{ platform: NodeJS.Platform, transparentType?: boolean, winOpaqueSafe?: boolean }} ctx
+ * @returns {boolean}
+ */
+function framelessWindowTransparency({ platform, transparentType = false, winOpaqueSafe = false }) {
+  if (platform === 'linux') return true;  // no native compositor, needs a transparent window.
+  if (platform === 'darwin') return true; // fixes #207 hover flash + avoids the opaque-backing ghost; power cost is negligible.
+  if (platform === 'win32' && !winOpaqueSafe) return true; // older Windows build: transparent (issue #122).
+  // Windows on a confirmed-good build: opaque so the window keeps Aero Snap /
+  // maximize; transparent only for the see-through 'transparent' type.
+  return transparentType;
+}
+
+/**
+ * Resolve `vscode_vibrancy.windowControlsStyle` into a value for VSCode's own
+ * `window.controlsStyle` setting.
+ *
+ * VSCode registers `window.controlsStyle` on Windows and Linux only (it's
+ * declared `included: !isMacintosh`), so writing it on macOS throws "not a
+ * registered configuration" — hence the null there, meaning "don't touch it".
+ *
+ * 'auto' maps to 'custom' so the controls are drawn by VSCode and blend with
+ * the vibrancy effect; the native ones render as an opaque strip over it.
+ * Tiling-WM users generally want 'hidden' instead, which is why this is a
+ * choice rather than a hardcoded 'custom'.
+ *
+ * @param {{ platform: NodeJS.Platform, windowControlsStyle?: string }} ctx
+ * @returns {'custom'|'hidden'|'native'|null} the value to write, or null to leave it alone
+ */
+function resolveWindowControlsStyle({ platform, windowControlsStyle = 'auto' }) {
+  if (platform === 'darwin') return null;
+  if (platform !== 'linux' && platform !== 'win32') return null;
+  if (windowControlsStyle === 'custom' || windowControlsStyle === 'hidden' || windowControlsStyle === 'native') {
+    return windowControlsStyle;
+  }
+  return 'custom';
+}
+
+/**
+ * Resolve the effective windowMode, folding in the deprecated boolean settings.
+ *
+ * An explicit windowMode (anything other than 'auto') always wins. Otherwise the
+ * legacy flags are migrated onto the enum, preserving their original precedence
+ * (forceFramelessWindow won over disableFramelessWindow) AND original intent —
+ * which was only ever "force the window frameless / force it framed", not a
+ * transparency choice. So the frameless variant is picked to match what the
+ * platform/material actually needs, sparing users (who likely don't know what
+ * the flags do) broken combinations:
+ *   - disableFramelessWindow → 'framed'
+ *   - forceFramelessWindow   → 'frameless' (opaque) on current Windows / Win11 DWM
+ *                              materials, where an opaque window keeps Aero Snap;
+ *                              'frameless-transparent' where a see-through window
+ *                              is wanted or needed (macOS, Linux, older Windows,
+ *                              or the 'transparent' type)
+ *
+ * `forceFramelessWindow` still matters under 'auto' on configs where auto stays
+ * framed — e.g. older VSCode on Windows with Electron <27 (issue #140).
+ *
+ * @param {{
+ *   windowMode?: string,
+ *   forceFramelessWindow?: boolean,
+ *   disableFramelessWindow?: boolean,
+ *   osType?: string,
+ *   platform?: NodeJS.Platform,
+ *   isWindows11?: boolean,
+ *   transparentType?: boolean,
+ * }} opts
+ * @returns {'auto' | 'framed' | 'frameless' | 'frameless-transparent'}
+ */
+function resolveEffectiveWindowMode(opts) {
+  const {
+    windowMode = 'auto',
+    forceFramelessWindow = false,
+    disableFramelessWindow = false,
+  } = opts;
+  if (windowMode && windowMode !== 'auto') return windowMode;
+  if (forceFramelessWindow) {
+    return framelessWindowTransparency(opts) ? 'frameless-transparent' : 'frameless';
+  }
+  if (disableFramelessWindow) return 'framed';
+  return 'auto';
+}
+
+/**
+ * Resolve the effective window mode into concrete BrowserWindow flags
+ * ({ frameless, transparent }).
+ *
+ * `windowMode` (vscode_vibrancy.windowMode) values:
+ *   - 'auto'                  platform/editor-appropriate default (see below)
+ *   - 'framed'                keep the OS frame, opaque window
+ *   - 'frameless'             borderless, opaque window
+ *   - 'frameless-transparent' borderless, transparent (see-through) window
+ *
+ * `transparent` is the BrowserWindow's per-pixel-alpha flag, NOT the vibrancy
+ * effect: vibrancy shows on either an opaque or a transparent window (macOS via
+ * a native NSVisualEffectView, Win11 via the DWM material). macOS and Linux use
+ * a transparent window — on macOS this fixes the file-browser hover flash
+ * (issue #207) and avoids the opaque-window stale-backing "ghost"; its power
+ * cost is negligible (the earlier "WindowServer GPU" worry was GPU utilization
+ * %, not actual power). Windows uses an opaque window so it keeps Aero Snap /
+ * maximize (a transparent window there is a layered window the OS won't snap),
+ * except older builds (issue #122) and the see-through 'transparent' type.
+ *
+ * 'auto' resolution:
+ *   - Cursor:               frameless on every platform it runs on
+ *   - macOS:                frameless + transparent
+ *   - Windows Electron >=27: frameless (issue #122) + opaque, so Aero Snap /
+ *                            maximize work (a thin border shows on Win10); only
+ *                            the 'transparent' type uses a see-through window
+ *   - Windows Electron <27:  framed
+ *   - Linux:                frameless + transparent (handled manually)
+ *
+ * @param {{
+ *   osType: string,
+ *   platform: NodeJS.Platform,
+ *   electronMajorVersion: number,
+ *   appName: string,
+ *   isWindows11?: boolean,
+ *   transparentType?: boolean,
+ *   windowMode?: 'auto' | 'framed' | 'frameless' | 'frameless-transparent',
+ * }} opts - `transparentType` is whether the resolved vibrancy type === 'transparent'.
+ * @returns {{ frameless: boolean, transparent: boolean }}
+ */
+function resolveWindowMode({
+  osType,
+  platform,
+  electronMajorVersion,
+  appName,
+  isWindows11 = false,
+  transparentType = false,
+  winOpaqueSafe = false,
+  windowMode = 'auto',
+}) {
+  // Explicit overrides map directly to flags.
+  if (windowMode === 'framed') return { frameless: false, transparent: false };
+  if (windowMode === 'frameless') return { frameless: true, transparent: false };
+  if (windowMode === 'frameless-transparent') return { frameless: true, transparent: true };
+
+  // windowMode === 'auto': pick frame and transparency per platform/editor.
+  let frameless;
+  if (appName === 'Cursor') {
+    frameless = true;
+  } else if (osType === 'macos') {
+    frameless = true;
+  } else if (platform === 'win32') {
+    // Electron >=27 needs frame:false for vibrancy on Windows (issue #122).
+    frameless = electronMajorVersion >= 27;
+  } else if (platform === 'linux') {
+    frameless = true;
+  } else {
+    frameless = false;
+  }
+
+  const transparent = frameless
+    ? framelessWindowTransparency({ platform, transparentType, winOpaqueSafe })
+    : false;
+
+  return { frameless, transparent };
+}
+
+/**
+ * Inject Electron BrowserWindow options (frame, transparent, visualEffectState).
+ * @param {string} electronJS - Electron main.js content
+ * @param {{ frameless: boolean, isMacos: boolean, transparent?: boolean }} opts
+ * @returns {string} Modified content
+ */
+function injectElectronOptions(electronJS, { frameless, isMacos, transparent = true }) {
+  // Clear previously injected options first so the result depends only on the
+  // current settings, not on install history. A plain re-install (Install, not
+  // Update) never runs removeElectronOptions, so without this: switching
+  // windowMode to 'framed' would leave the old frame:false/transparent:true in
+  // place and the window would stay borderless and see-through, and switching
+  // between the two frameless modes would inject a second, conflicting pair
+  // (frame:false,transparent:true,frame:false,transparent:false,…).
+  // It's a no-op on unpatched content.
+  let result = removeElectronOptions(electronJS);
+
+  // visualEffectState is a macOS-only Electron option.
+  if (isMacos) {
+    result = injectVisualEffectState(result);
+  }
+
+  // Add frameless + (optionally) transparent window options. The caller passes
+  // transparent:false for opaque modes (Windows snapping, Win11 DWM materials).
+  if (frameless) {
+    result = injectFramelessWindow(result, transparent);
+  }
+
+  return result;
+}
+
+/**
+ * Remove injected Electron BrowserWindow options.
+ * @param {string} electronJS - Electron main.js content
+ * @returns {string} Cleaned content
+ */
+function removeElectronOptions(electronJS) {
+  const withoutObjectLiteralOptions = electronJS
+    .replace(/visualEffectState:"active",frame:false,transparent:(?:true|false),experimentalDarkMode/g, 'experimentalDarkMode')
+    .replace(/frame:false,transparent:(?:true|false),visualEffectState:"active",experimentalDarkMode/g, 'experimentalDarkMode')
+    .replace(/frame:false,transparent:(?:true|false),experimentalDarkMode/g, 'experimentalDarkMode')
+    .replace(/visualEffectState:"active",experimentalDarkMode/g, 'experimentalDarkMode');
+
+  return removeCursorWindowOptions(withoutObjectLiteralOptions);
+}
+
+// --- CSP / HTML ---
+
+/**
+ * Add VscodeVibrancyContinued to the CSP trusted-types directive.
+ * @param {string} html - Workbench HTML content
+ * @returns {{ result: string, alreadyPatched: boolean, noMetaTag: boolean }}
+ */
+function patchCSP(html) {
+  const metaTagRegex = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([\s\S]+?)">/;
+  const metaTagMatch = html.match(metaTagRegex);
+
+  if (!metaTagMatch) {
+    return { result: html, alreadyPatched: false, noMetaTag: true };
+  }
+
+  const cspContent = metaTagMatch[1];
+
+  if (cspContent.includes('VscodeVibrancyContinued')) {
+    return { result: html, alreadyPatched: true, noMetaTag: false };
+  }
+
+  let newCspContent;
+  if (cspContent.includes('trusted-types')) {
+    // Remove legacy marker (original vscode-vibrancy) if present
+    let cleanedCsp = cspContent.replace(/ VscodeVibrancy(?!Continued)/g, '');
+    // Add VscodeVibrancyContinued to existing trusted-types directive
+    newCspContent = cleanedCsp.replace(/(?<!-)trusted-types(?!-)/, 'trusted-types VscodeVibrancyContinued');
+  } else {
+    // No trusted-types directive — add one
+    newCspContent = cspContent.replace(/;?\s*$/, '; trusted-types VscodeVibrancyContinued');
+  }
+
+  const newMetaTag = metaTagMatch[0].replace(cspContent, newCspContent);
+  return { result: html.replace(metaTagMatch[0], newMetaTag), alreadyPatched: false, noMetaTag: false };
+}
+
+/**
+ * Remove VscodeVibrancy/VscodeVibrancyContinued from CSP.
+ * @param {string} html - HTML content
+ * @returns {string} Cleaned HTML
+ */
+function removeCSPPatch(html) {
+  if (!html.includes('VscodeVibrancy')) return html;
+  return html
+    .replace(/ VscodeVibrancyContinued/g, '')
+    .replace(/ VscodeVibrancy/g, '');
+}
+
+// --- Color Utilities ---
+
+/**
+ * Compute #RRGGBBAA hex from a theme background hex and opacity float.
+ * @param {string} themeBackground - 6-char hex without # (e.g. "1e1e1e")
+ * @param {number} opacity - 0.0 to 1.0
+ * @returns {string} "#RRGGBBAA"
+ */
+function computeTransparentHex(themeBackground, opacity) {
+  const alpha = Math.round(opacity * 255).toString(16).padStart(2, '0');
+  return `#${themeBackground}${alpha}`;
+}
+
+/**
+ * Extract 6-char hex RGB from a user color value.
+ * Handles #RGB, #RRGGBB, #RRGGBBAA (strips alpha), and bare hex strings.
+ * Returns null if the value is not a valid hex color.
+ * @param {*} value - Color string from user settings
+ * @returns {string|null} 6-char hex without # (e.g. "f6f6f6"), or null
+ */
+function extractBaseColor(value) {
+  if (typeof value !== 'string') return null;
+  const hex = value.replace(/^#/, '');
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) return hex.toLowerCase();
+  if (/^[0-9a-fA-F]{8}$/.test(hex)) return hex.slice(0, 6).toLowerCase();
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    return (hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2]).toLowerCase();
+  }
+  return null;
+}
+
+/**
+ * Compute per-key vibrancy color overrides, preserving the user's original
+ * color for each key (if any) instead of using a single global background.
+ *
+ * @param {Object} opts
+ * @param {string} opts.themeBackground - 6-char fallback hex (e.g. "1e1e1e")
+ * @param {number} opts.opacity - User's vibrancy opacity (0.0–1.0)
+ * @param {Object<string, string|null>} opts.originalColors - Backed-up per-key
+ *   color values from the user's settings (before vibrancy was applied).
+ *   Keys not present or null fall back to themeBackground.
+ * @param {Object<string, number|string|null>} [opts.themeColorCustomizations] -
+ *   The active theme's `colorCustomizations` block, applied on top of the tiers
+ *   above. See parseThemeColorCustomizations.
+ * @returns {Object<string, string>} Map of color key → "#RRGGBBAA" value
+ */
+function computeVibrancyColors({ themeBackground, opacity, originalColors = {}, themeColorCustomizations }) {
+  const result = {};
+  for (const key of TRANSPARENT_BG_KEYS) {
+    const base = extractBaseColor(originalColors[key]) ?? themeBackground;
+    result[key] = `#${base}00`;
+  }
+  for (const key of SEMITRANSPARENT_BG_KEYS) {
+    const base = extractBaseColor(originalColors[key]) ?? themeBackground;
+    result[key] = computeTransparentHex(base, opacity);
+  }
+  for (const key of STICKY_SCROLL_BG_KEYS) {
+    const base = extractBaseColor(originalColors[key]) ?? themeBackground;
+    result[key] = computeTransparentHex(base, Math.max(opacity, STICKY_SCROLL_MIN_OPACITY));
+  }
+  for (const key of OPAQUE_BG_KEYS) {
+    const base = extractBaseColor(originalColors[key]) ?? themeBackground;
+    result[key] = computeTransparentHex(base, 0.9);
+  }
+
+  // Theme enrichment wins over the tier defaults above.
+  const { overrides, unmanaged } = parseThemeColorCustomizations(themeColorCustomizations);
+  for (const [key, spec] of Object.entries(overrides)) {
+    if (spec.literal !== undefined) {
+      result[key] = spec.literal;
+    } else {
+      const base = extractBaseColor(originalColors[key]) ?? themeBackground;
+      result[key] = computeTransparentHex(base, spec.alpha);
+    }
+  }
+  // Keys the theme opted out of must not be written at all — the caller is
+  // responsible for restoring/removing them from the user's settings.
+  for (const key of unmanaged) {
+    delete result[key];
+  }
+
+  return result;
+}
+
+/**
+ * A theme-declared literal colour: #RGB, #RGBA, #RRGGBB or #RRGGBBAA.
+ */
+const THEME_COLOR_LITERAL_REGEX = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+/**
+ * Parse a theme's optional `colorCustomizations` block.
+ *
+ * Themes use this to enrich (or opt out of) vibrancy's default per-key
+ * treatment, so a theme whose look only calls for *part* of the workbench to be
+ * translucent doesn't have to fight the global defaults in CSS. Three spec
+ * forms are accepted per colour key:
+ *
+ *   - `number` 0–1 — alpha applied to the key's base colour (the user's own
+ *     value for that key if they had one, else the theme background).
+ *   - `"#RRGGBB"` / `"#RRGGBBAA"` / `"#RGB"` / `"#RGBA"` — written verbatim.
+ *   - `null` — unmanaged: vibrancy writes nothing for this key, so the active
+ *     colour theme's own value applies. This is what "only subbar"-style themes
+ *     want for the editor region: an alpha of 1 would flatten every key to the
+ *     same theme background, whereas opting out keeps each key's real colour and
+ *     the region renders exactly like stock VSCode.
+ *
+ * Invalid specs are skipped with a warning rather than corrupting the user's
+ * settings with a bad colour value.
+ *
+ * @param {Object<string, number|string|null>} [themeColorCustomizations]
+ * @returns {{overrides: Object<string, {alpha?: number, literal?: string}>, unmanaged: string[]}}
+ */
+function parseThemeColorCustomizations(themeColorCustomizations) {
+  const overrides = {};
+  const unmanaged = [];
+
+  if (
+    !themeColorCustomizations ||
+    typeof themeColorCustomizations !== 'object' ||
+    Array.isArray(themeColorCustomizations)
+  ) {
+    return { overrides, unmanaged };
+  }
+
+  for (const [key, spec] of Object.entries(themeColorCustomizations)) {
+    if (spec === null) {
+      unmanaged.push(key);
+    } else if (typeof spec === 'number') {
+      if (!Number.isFinite(spec) || spec < 0 || spec > 1) {
+        console.warn(`Vibrancy: theme colorCustomizations["${key}"] must be an alpha between 0 and 1, got ${spec} — ignoring.`);
+        continue;
+      }
+      overrides[key] = { alpha: spec };
+    } else if (typeof spec === 'string' && THEME_COLOR_LITERAL_REGEX.test(spec)) {
+      overrides[key] = { literal: spec };
+    } else {
+      console.warn(`Vibrancy: theme colorCustomizations["${key}"] must be an alpha 0–1, a #hex colour, or null — ignoring ${JSON.stringify(spec)}.`);
+    }
+  }
+
+  return { overrides, unmanaged };
+}
+
+/**
+ * Every colour key vibrancy takes responsibility for under a given theme: its
+ * own defaults plus anything the theme's `colorCustomizations` names. Used to
+ * decide what to back up, and what to clean out again on disable — a theme that
+ * introduces a key outside the built-in tiers (or opts one out) still needs that
+ * key restored rather than left orphaned in the user's settings.
+ *
+ * @param {Object<string, number|string|null>} [themeColorCustomizations]
+ * @returns {string[]}
+ */
+function resolveManagedBgKeys(themeColorCustomizations) {
+  const keys = new Set(ALL_VIBRANCY_BG_KEYS);
+  const { overrides, unmanaged } = parseThemeColorCustomizations(themeColorCustomizations);
+  for (const key of [...Object.keys(overrides), ...unmanaged]) {
+    keys.add(key);
+  }
+  return [...keys];
+}
+
+// --- Background Key Constants ---
+
+const TRANSPARENT_BG_KEYS = [
+  "editorPane.background",
+  "editorGroupHeader.tabsBackground",
+  "editorGroupHeader.noTabsBackground",
+  "breadcrumb.background",
+  "editorGutter.background",
+  "panel.background",
+  "tab.activeBackground",
+  "tab.unfocusedActiveBackground",
+];
+
+const SEMITRANSPARENT_BG_KEYS = [
+  "sideBar.background",
+  "sideBarTitle.background",
+  "activityBar.background",
+  "editor.background",
+  "tab.inactiveBackground",
+  "tab.unfocusedInactiveBackground",
+];
+
+/**
+ * Sticky scroll floats on top of the content it pins — the pinned editor lines
+ * sit over the code that scrolled past them, and the pinned tree rows sit over
+ * the rows below them. At the surrounding surface's opacity that content shows
+ * straight through and neither is readable (issues #14, #132, #152, #204), so
+ * these get a legibility floor instead. A user who has already chosen a more
+ * opaque vibrancy keeps their own value.
+ *
+ * terminalStickyScroll.background is included because it otherwise inherits
+ * terminal.background, which vibrancy sets to fully transparent.
+ */
+const STICKY_SCROLL_MIN_OPACITY = 0.75;
+
+const STICKY_SCROLL_BG_KEYS = [
+  "editorStickyScroll.background",
+  "editorStickyScrollGutter.background",
+  "sideBarStickyScroll.background",
+  "panelStickyScroll.background",
+  "terminalStickyScroll.background",
+];
+
+const OPAQUE_BG_KEYS = [
+  "inlineChat.background",
+  "editorWidget.background",
+  "editorHoverWidget.background",
+  "editorSuggestWidget.background",
+  "notifications.background",
+  "notificationCenterHeader.background",
+  "menu.background",
+  "quickInput.background",
+];
+
+const ALL_VIBRANCY_BG_KEYS = [
+  ...TRANSPARENT_BG_KEYS,
+  ...SEMITRANSPARENT_BG_KEYS,
+  ...STICKY_SCROLL_BG_KEYS,
+  ...OPAQUE_BG_KEYS,
+];
+
+/**
+ * Does this colour value look like something Vibrancy wrote?
+ *
+ * Every tier above produces an 8-digit `#RRGGBBAA` with an alpha below `ff` —
+ * `00` for the transparent keys, `e6` for the opaque ones, and something derived
+ * from the user's opacity in between. So under a key Vibrancy manages, a
+ * translucent 8-digit hex is Vibrancy's own output rather than a value belonging
+ * to the user.
+ *
+ * This deliberately does *not* check the RGB against the current theme
+ * background, which is how it used to identify its own writes. That test fails
+ * the moment the colours and the theme come from different places — VSCode's
+ * "copy from profile" option duplicates `settings.json` into the new profile but
+ * not the extension's backup, so a copied profile starts out holding 28 of
+ * Vibrancy's colours with no record of what they replaced. Switch the colour
+ * theme there and every one of them was adopted as if the user had chosen it,
+ * which meant disabling Vibrancy *restored* fully transparent backgrounds with
+ * no vibrancy left behind them. That is the issue
+ * [#183](https://github.com/illixion/vscode-vibrancy-continued/issues/183)
+ * symptom, reachable without ever touching a second profile's settings by hand.
+ *
+ * The trade-off: someone who deliberately sets a translucent background on a
+ * managed key no longer has it preserved. That costs little, because Vibrancy
+ * overwrites those keys while it is active anyway — so the value would not have
+ * survived regardless — whereas restoring a translucent colour once the effect
+ * is gone always looks broken.
+ *
+ * @param {any} value - The value currently in settings.json
+ * @returns {boolean}
+ */
+function looksLikeVibrancyValue(value) {
+  return typeof value === 'string' && /^#[0-9a-f]{6}(?![fF]{2}$)[0-9a-f]{2}$/i.test(value);
+}
+
+module.exports = {
+  VIBRANCY_START,
+  VIBRANCY_END,
+  MARKER_REGEX,
+  generateNewJS,
+  removeJSMarkers,
+  resolveEffectiveWindowMode,
+  resolveWindowMode,
+  resolveWindowControlsStyle,
+  injectElectronOptions,
+  removeElectronOptions,
+  patchCSP,
+  removeCSPPatch,
+  computeTransparentHex,
+  extractBaseColor,
+  computeVibrancyColors,
+  parseThemeColorCustomizations,
+  resolveManagedBgKeys,
+  TRANSPARENT_BG_KEYS,
+  SEMITRANSPARENT_BG_KEYS,
+  STICKY_SCROLL_BG_KEYS,
+  STICKY_SCROLL_MIN_OPACITY,
+  OPAQUE_BG_KEYS,
+  ALL_VIBRANCY_BG_KEYS,
+  looksLikeVibrancyValue,
+  deepEqual,
+  isPrimitive,
+  checkRuntimeUpdate,
+  getConfigDir,
+};

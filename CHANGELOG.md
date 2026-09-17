@@ -1,0 +1,646 @@
+# 1.1.93
+
+* Core:
+  * Themes can now set their own `workbench.colorCustomizations` from their JSON config — a per-key alpha, a literal colour, or `null` to leave the key to your colour theme. This is what lets a theme make a surface opaque again, which CSS alone couldn't do (see `themes/README.md`)
+  * Fix several ways your own background colours could be lost. Vibrancy now checks what it actually wrote against `settings.json` on every run instead of trusting a backup taken once at install, so a colour you edited by hand — or that arrived from another machine via Settings Sync — is restored rather than deleted. Toggling `vscode_vibrancy.disableColorCustomizations` on and off again no longer leaves Vibrancy without a backup, and turning it on while Vibrancy is active no longer strands translucent colours in `settings.json`
+  * Vibrancy now knows which VSCode profile enabled it. The effect comes from patching VSCode's shared files, but the colours it needs are stored per profile — so disabling from a different profile used to revert the effect for everyone while leaving translucent colours stranded behind it, which is what put an outline around every glyph in the terminal in issue [#183](https://github.com/illixion/vscode-vibrancy-continued/issues/183). Disable now stops and explains, with a "Disable anyway" override so a deleted profile can't leave you stuck, and enabling from a second profile warns that it's taking ownership. The right profile's `settings.json` is recorded too, instead of always the default profile's — and an install made before this release has its record corrected on startup, rather than waiting for you to reload Vibrancy
+  * Explain the profile scope mismatch once, instead of leaving you to discover it — a second profile shows the effect without the colours and simply looks broken. If another profile is still holding Vibrancy's colours, Vibrancy names it and says where to disable it; if that profile doesn't have Vibrancy at all, it says so rather than sending you after a Disable command that isn't there
+  * Fix a profile created with "Copy from profile" adopting Vibrancy's colours as if you'd chosen them. That option copies `settings.json` but not extension state, so the new profile started out holding all of Vibrancy's translucent colours with no record of what they replaced — and disabling later *restored* fully transparent backgrounds. Vibrancy now recognises its own colours by their translucency, so a copied profile is cleaned up correctly whatever theme it uses
+  * Disabling Vibrancy no longer hands your colours back before it knows it can unpatch VSCode. Declining the administrator prompt, or a write that failed, used to leave the editor still translucent with the colours that made that look deliberate already gone — and no hint that running Disable again would put it right. The two halves now succeed or fail together
+  * `settings.json` is now edited with a real JSONC parser instead of pattern matching. Comments next to a removed setting survive, a commented-out colour key is no longer mangled, restores no longer leave indentation debris, and a `settings.json` that doesn't parse is reported and left alone rather than edited into something worse
+  * Uninstalling now cleans up the same colour keys on every platform. Windows kept its own copy of the list and had drifted — `terminalStickyScroll.background` was never removed from `settings.json` — and keys a theme introduces are cleaned up too
+  * Note: the theme fixes below, and the colour values a theme now contributes, only apply once Vibrancy re-patches VSCode — run **Reload Vibrancy** to pick them up now, or they'll land the next time VSCode updates
+* Themes:
+  * Fix the "Only Subbar" themes not looking like "only subbar" any more: the editor, tabs, panel and terminal had gone translucent along with the chrome, so the whole window went see-through instead of just the title bar, activity bar and side bar (issue [#273](https://github.com/illixion/vscode-vibrancy-continued/issues/273))
+  * Tokyo Night Storm (Outer): same fix, so "outer" once again means only the chrome around the editor is translucent
+  * Fix the side bar's header sitting darker than the side bar itself in the "Only Subbar" and Tokyo Night Storm (Outer) themes, where it showed up as a distinctly darker band above the file tree
+
+# 1.1.92
+
+* Themes:
+  * Full screen no longer forces an opaque background. Every theme carried a `.monaco-workbench.fullscreen` rule dating back to 2021 that painted a solid colour in full screen; testing on VSCode 1.133 showed the selector no longer matches anything, so the rule had quietly stopped doing its job. It's now removed rather than left to rot. Where the platform allows it, full screen simply keeps the vibrancy: on Windows and Linux the desktop is still behind the window, so the effect works. On macOS full screen moves the window to its own Space with nothing rendered behind it, so the effect can't work there regardless — use `"zenMode.fullScreen": false` if you want Zen Mode with vibrancy intact (issues [#47](https://github.com/illixion/vscode-vibrancy-continued/issues/47), [#67](https://github.com/illixion/vscode-vibrancy-continued/issues/67))
+  * Anyone who worked around this with a `.monaco-workbench.fullscreen { background-color: transparent }` override in `vscode_vibrancy.imports` can now drop it
+
+# 1.1.91
+
+* Core:
+  * Fix sticky scroll being unreadable over the vibrancy. The editor, explorer and panel sticky scroll backgrounds were written at the same opacity as the surfaces around them, but sticky scroll floats on top of the content it pins — so at the macOS default opacity of `0.3` the pinned lines and the code scrolling past behind them were legible on top of each other. Sticky scroll now gets its own opacity floor of `max(opacity, 0.75)`, so it always has enough body to hide what's behind it; if you already run a more opaque vibrancy, your own value is kept (issues [#14](https://github.com/illixion/vscode-vibrancy-continued/issues/14), [#132](https://github.com/illixion/vscode-vibrancy-continued/issues/132), [#152](https://github.com/illixion/vscode-vibrancy-continued/issues/152), [#204](https://github.com/illixion/vscode-vibrancy-continued/issues/204))
+  * Fix the terminal's sticky scroll being invisible: it has no colour of its own and inherited `terminal.background`, which Vibrancy sets to fully transparent
+  * Note: run **Reload Vibrancy** once after updating so the new colour values are written to your settings
+* Themes:
+  * Atom One Dark: drop its hardcoded sticky scroll surface so the widget follows the same opacity floor as every other theme
+* Documentation:
+  * Explain when the effect can't work in full screen. It's a macOS-only limitation — a full-screen window moves to its own Space with no desktop rendered behind it, so there's nothing for the vibrancy to sample. Windows is unaffected. Zen Mode is only caught by this because it enables full screen by default, so `"zenMode.fullScreen": false` keeps the effect on macOS (issues [#47](https://github.com/illixion/vscode-vibrancy-continued/issues/47), [#67](https://github.com/illixion/vscode-vibrancy-continued/issues/67))
+
+# 1.1.90
+
+* Core:
+  * macOS: fix a rare case where the "Restart Visual Studio Code" flow could leave `window.titleBarStyle` stuck on `native`, making the window controls (traffic lights) disappear. The restart prompt works by briefly toggling `window.titleBarStyle`, and a restart, reload, or failed settings write in that moment could persist the wrong value. The toggle now records the original value first, restores it on failure, and any interrupted toggle is automatically repaired on the next launch — one more restart brings the controls back, no manual settings edit needed
+
+# 1.1.89
+
+* Core:
+  * Fix vibrancy turning opaque under VSCode 1.133's experimental Modern UI (`workbench.experimental.modernUI`, server-side A/B tested). Modern UI repaints the sidebar, panel, auxiliary bar and every pane with higher-specificity `!important` backgrounds; all bundled themes now re-assert their vibrancy backgrounds to match, so editor, sidebar, panel and shell stay translucent whether or not you're in the experiment (issues [#269](https://github.com/illixion/vscode-vibrancy-continued/issues/269), [#270](https://github.com/illixion/vscode-vibrancy-continued/issues/270), [#271](https://github.com/illixion/vscode-vibrancy-continued/issues/271))
+  * Fix floating (tear-out) editor windows never getting vibrancy — they're opened as `about:blank` popups that didn't match the runtime's injection gate, and VSCode also blocks `document.createElement` in these windows in a way that would have broken injection anyway (issue [#115](https://github.com/illixion/vscode-vibrancy-continued/issues/115))
+
+# 1.1.88
+
+* Core:
+  * Fix `windowMode` changes not taking effect on a plain "Enable Vibrancy" (only "Reload Vibrancy" cleared old window options before): switching to `framed` could leave the window borderless and transparent, and switching between frameless modes could inject conflicting options
+  * Linux: warn at install time when `windowMode` is `framed` (or the deprecated `disableFramelessWindow` is set), since Linux vibrancy is produced entirely by window transparency and a framed window installs successfully but shows no effect (issue [#268](https://github.com/illixion/vscode-vibrancy-continued/issues/268))
+
+# 1.1.87
+
+* Core:
+  * Add `windowControlsStyle` setting (`auto` / `custom` / `hidden` / `native`) to control window control visibility for tiling window manager users on Linux and Windows
+  * Add a Linux fallback to a terminal sudo prompt when pkexec can't prompt
+  * Fix window options potentially being reset when installing with an elevated writer
+
+# 1.1.86
+
+* Core:
+  * NixOS support: VSCode installed from nixpkgs lives in the read-only `/nix/store`, where Vibrancy previously failed since its files can't be patched even with elevated privileges. Enabling Vibrancy now automatically creates a writable copy of the VSCode package under `~/.local/share/vscode-vibrancy/`, patches the copy, and adds a **"Visual Studio Code (Vibrancy)"** entry to the application menu that launches it — the original Nix store installation is never modified. Works with both nixpkgs `vscode` and `vscodium`. See the new "NixOS notes" section in the README for details
+  * After a `nixos-rebuild` that updates VSCode, the next launch of the Vibrancy copy detects the change and offers a one-click "Rebuild and re-enable" that recreates the copy from the new version
+  * A stable path `~/.local/share/vscode-vibrancy/current/bin/code` always points at the active copy, for use in shell aliases or your Nix config (the hashed copy directory changes on every system update)
+  * Disabling Vibrancy or uninstalling the extension removes the copy, the menu entry, and all related settings
+  * Other read-only installations (e.g. distros with an immutable `/usr`) now abort with a clear "unsupported" message instead of crashing mid-install
+
+# 1.1.85
+
+* Core:
+  * Fix quadratic regex backtracking on large bundles that caused ~20 second parsing delays, now reduced to ~200ms
+  * Add support for the rebranded "Antigravity IDE" editor
+
+# 1.1.84
+
+* Core:
+  * macOS defaults to a **frameless + transparent** window (the classic vibrancy look), which fixes the file-browser hover flash (issues [#200](https://github.com/illixion/vscode-vibrancy-continued/issues/200), [#206](https://github.com/illixion/vscode-vibrancy-continued/issues/206), [#207](https://github.com/illixion/vscode-vibrancy-continued/issues/207)). An interim build had switched macOS to an *opaque* window to cut "WindowServer GPU usage" — but that was a measurement mistake: the metric was GPU **utilization %** (occupancy), not power. Measured properly with `powermetrics` on both Apple Silicon (M2 Max) and Intel (2019, Iris Plus 655), the real power difference between transparent and opaque is negligible — the GPU sits ~98% idle when static. Worse, the opaque window introduced a separate bug: stale "ghost" pixels in the file tree on some layouts, which no repaint/invalidate/resize workaround reliably clears (it's the native opaque-window backing). So macOS stays on a transparent window. Vibrancy itself is unchanged.
+  * New `vscode_vibrancy.windowMode` setting (`auto` / `framed` / `frameless` / `frameless-transparent`) replaces the `forceFramelessWindow` and `disableFramelessWindow` booleans, which are now deprecated. Existing configs are migrated automatically: `disableFramelessWindow` → `framed`, and `forceFramelessWindow` → the frameless mode appropriate for the platform (`frameless-transparent` on macOS and Linux, opaque `frameless` on Windows and with Windows 11 Mica/Acrylic materials). The migration is platform/material-aware so it never produces a broken combination, and `auto` picks the right combination per platform.
+  * On VSCode 1.101+ (Electron 35), Windows now defaults to an **opaque** window so Aero Snap, maximize, and resize work out of the box (previously a transparent/layered window blocked snapping). The trade-off is a thin 1px border on Windows 10 (none on Windows 11). Older VSCode builds keep the previous transparent (non-snappable) window, since opaque vibrancy sheared editor text there (issue [#122](https://github.com/illixion/vscode-vibrancy-continued/issues/122), fixed in Electron 35). For a fully borderless look, set `windowMode` to `frameless-transparent` and pair it with a third-party snapping utility — see the Windows notes in the README.
+  * Fix Windows breaking VSCode's install when a pending update is applied during a Vibrancy relaunch — the restart now waits for VSCode's updater to finish (and skips relaunching if the editor is already back up) instead of racing it and leaving a half-extracted install that wouldn't start.
+  * Fix `opacity` and `refreshInterval` showing a blank value with a "value must be a number" warning on fresh installs or after resetting to default — their schema defaults were quoted strings instead of numbers.
+  * Fix the misspelled `preferedDarkTheme` / `preferedLightTheme` settings, renamed to `preferredDarkTheme` / `preferredLightTheme`. Previous settings are migrated automatically.
+  * Activate via `onStartupFinished` instead of `*`, avoiding the startup-performance impact vsce warns about while still showing the first-run notification.
+
+# 1.1.83
+
+* Core:
+  * Revert the macOS frameless-window default introduced in 1.1.81. It fixed occasional file-browser hover flashing, but on recent macOS (observed on Tahoe 26.5) a frameless + transparent window causes elevated WindowServer GPU and power usage that scales with window size. macOS now uses a framed window by default again; opt in with `vscode_vibrancy.forceFramelessWindow` if you want the flashing gone and accept the higher power draw (not guaranteed to fix it) (issue [#207](https://github.com/illixion/vscode-vibrancy-continued/issues/207))
+  * Add support for the Devin editor (the rebranded Windsurf), which broke after the 1.1.80 supported-editor check (PR [#261](https://github.com/illixion/vscode-vibrancy-continued/pull/261))
+* Contributors:
+  * [@asj8000](https://github.com/asj8000)
+
+# 1.1.82
+
+* Core:
+  * Fix misleading "unsupported editor" error on editors outside the known list: when `forceFramelessWindow` is the only reason a frameless window was attempted, installation now shows an actionable message telling you which setting to disable instead of failing with no recovery path
+
+# 1.1.81
+
+* Core:
+  * Fix Windows 10 window drag lag when acrylic is enabled — the blur is now dropped while moving/resizing the window and restored once it goes idle (issue [#52](https://github.com/illixion/vscode-vibrancy-continued/issues/52))
+  * Add Windows 11 Mica and Mica Alt ("Tabbed") support via the modern DWM backdrop API, selectable as new `mica` and `tabbed` types; Windows 11 acrylic now uses this lag-free path too (issue [#19](https://github.com/illixion/vscode-vibrancy-continued/issues/19))
+  * Enable frameless window by default on macOS to fix UI rendering glitches on Apple Silicon (opt out via `vscode_vibrancy.disableFramelessWindow`)
+
+# 1.1.80 (prerelease)
+
+* Core:
+  * Fix Windows 10 window drag lag when acrylic is enabled — the blur is now dropped while moving/resizing the window and restored once it goes idle (issue [#52](https://github.com/illixion/vscode-vibrancy-continued/issues/52))
+  * Add Windows 11 Mica and Mica Alt ("Tabbed") support via the modern DWM backdrop API, selectable as new `mica` and `tabbed` types; Windows 11 acrylic now uses this lag-free path too (issue [#19](https://github.com/illixion/vscode-vibrancy-continued/issues/19))
+  * Enable frameless window by default on macOS to fix UI rendering glitches on Apple Silicon (opt out via `vscode_vibrancy.disableFramelessWindow`)
+
+# 1.1.79
+
+* Themes:
+  * Make Cursor's "Agents Window" button less prominent in Paradise themes (PR [#256](https://github.com/illixion/vscode-vibrancy-continued/pull/256))
+* Contributors:
+  * [@nickesc](https://github.com/nickesc)
+
+# 1.1.78
+
+* Core:
+  * Fix macOS inactive-window vibrancy not applying in Cursor (issue [#253](https://github.com/illixion/vscode-vibrancy-continued/issues/253), PR [#254](https://github.com/illixion/vscode-vibrancy-continued/pull/254))
+* Contributors:
+  * [@alexcarv318](https://github.com/alexcarv318)
+
+# 1.1.77
+
+* Core:
+  * Stop poisoning the user-color backup when reinstalling vibrancy (issue [#247](https://github.com/illixion/vscode-vibrancy-continued/issues/247))
+* Docs:
+  * Add nightly CI results badge to readme
+
+# 1.1.76
+
+* Themes:
+  * Add Atom One Dark theme (PR [#248](https://github.com/illixion/vscode-vibrancy-continued/pull/248))
+  * Make floating menus and tooltips semi-opaque (PR [#249](https://github.com/illixion/vscode-vibrancy-continued/pull/249))
+* Contributors:
+  * [@Zushah](https://github.com/Zushah)
+  * [@nickesc](https://github.com/nickesc)
+
+# 1.1.75
+
+* Themes:
+  * Fix invisible text in Git Graph labels across all themes (issue [#246](https://github.com/illixion/vscode-vibrancy-continued/issues/246))
+* Build & Release:
+  * Fix branch divergence in release workflow by syncing development after squash merge
+
+# 1.1.74
+
+* Core:
+  * Fix Simplified Chinese i18n loading on case-sensitive file systems
+* Build & Release:
+  * Add /release slash command for automated release workflow
+  * Update publish workflow to use draft release pattern
+  * Rename changelog.md to CHANGELOG.md
+* Contributors:
+  * [@AkimioJR](https://github.com/AkimioJR)
+
+# 1.1.73
+
+* Core:
+  * Fix multi-window conflicts by scoping per-window state in runtime modules (PR [#241](https://github.com/illixion/vscode-vibrancy-continued/pull/241))
+  * Make overwrite install() idempotent to prevent nested wrappers (PR [#241](https://github.com/illixion/vscode-vibrancy-continued/pull/241))
+  * Guard against corrupt config.json in uninstall hook (PR [#240](https://github.com/illixion/vscode-vibrancy-continued/pull/240))
+* Contributors:
+  * @lawrence3699
+
+# 1.1.72
+
+* Core:
+  * Add `disableColorCustomizations` setting to prevent Vibrancy from modifying `workbench.colorCustomizations`, for users who manage color customizations independently
+* Tests:
+  * Extract VSCode settings logic into a separate module with dependency injection for testability
+  * Add settings verification to E2E test pipeline (checks settings.json after install and uninstall)
+  * Add 23 unit tests for settings apply/restore logic, including full round-trip and mid-session toggle scenarios
+
+# 1.1.71
+
+* Themes:
+  * Refine Paradise theme for VSCode and Cursor (PR [#238](https://github.com/illixion/vscode-vibrancy-continued/pull/238))
+  * Fix inline chat appearing transparent in all themes
+* Contributors:
+  * [@nickesc](https://github.com/nickesc)
+
+# 1.1.70
+
+* Themes:
+  * Restores Paradise themes editor background and optimizes Paradise theme performance
+* Contributors:
+  * [@nickesc](https://github.com/nickesc)
+
+# 1.1.69
+
+* Core:
+  * Respect user's `workbench.colorCustomizations` settings for background colors instead of overriding them, allowing users to customize the Vibrancy theme further
+
+# 1.1.68
+
+* Themes:
+  * Fix Jupyter notebook backgrounds having a dark rectangle behind them
+  * Fix hover text popups using a transparent background that makes them unreadable
+
+# 1.1.67
+
+* Core:
+  * Update checkColorTheme function to accept testMode parameter, fixes error on enabling
+
+# 1.1.66
+
+* Core:
+  * Background override now recolors all theme element backgrounds (sidebar, tabs, lists, etc.), not just the base HTML background
+  * Set transparent `workbench.colorCustomizations` backgrounds so extension webviews (e.g. Claude Code, Jupyter) inherit vibrancy
+  * Fix bug affecting restoration of settings in IDEs that are not VSCode when uninstalling
+  * Fix modal editor losing opaque background due to theme CSS overrides (e.g.  VSCode settings editor)
+  * Fix uninstall hook losing user's original background colors
+  * Fix runtime folder not copying correctly on Windows leading to crash
+  * Implement deferred settings restoration for Windows during uninstallation
+  * Sanitize user-provided JS/CSS to prevent script/style tag escaping
+* Testing:
+  * Add automated test infrastructure with unit, integration, and E2E tests
+
+# 1.1.65
+
+* Core:
+  * Add `backgroundOverride` setting to override the theme's background color for the vibrancy effect
+  * Fix current theme check to work with new names of default dark and light VSCode themes
+
+# 1.1.64
+
+* Themes
+  * Fix Antigravity theme fixes not loading correctly
+
+# 1.1.63
+
+* Core:
+  * Add Linux support (transparency only, blur requires a compositor such as KWin, Hyprland, or Picom) (resolves [#27](https://github.com/illixion/vscode-vibrancy-continued/issues/27))
+  * Add support for Code - OSS and Antimatter (resolves [#228](https://github.com/illixion/vscode-vibrancy-continued/issues/228))
+  * Add sudo/elevation support for all platforms to account for system installs or permission issues (resolves [#15](https://github.com/illixion/vscode-vibrancy-continued/issues/15))
+  * Fix CSP header modifications blocking installation with third-party extensions that overwrite the default workbench.html (e.g. Apc, Customize UI) (resolves [#117](https://github.com/illixion/vscode-vibrancy-continued/issues/117))
+  * Ensure compatibility with VSCode 1.86
+  * Improve Electron JS file path handling on Windows
+  * Ensure `undefined` is never written to settings.json during uninstall hook settings restoration
+* Themes:
+  * Improve Paradise for Cursor theme with fixes for tab colors, bottom panel, and agents view
+* Contributors:
+  * Thanks to [@DreamOneX](https://github.com/DreamOneX) for Linux support and Antigravity support
+  * [@nickesc](https://github.com/nickesc)
+
+# 1.1.62
+
+* Core:
+  * Fix blurry graphics in Cursor by enabling frameless windows by default (resolves [#219](https://github.com/illixion/vscode-vibrancy-continued/issues/219))
+* Themes:
+  * Add minimap in GitHub Dark theme (resolves [#218](https://github.com/illixion/vscode-vibrancy-continued/issues/218))
+
+# 1.1.61
+
+* Themes:
+  * Fix opaque terminal background in Paradise Cursor theme
+* Contributors:
+  * [@nickesc](https://github.com/nickesc)
+
+# 1.1.60
+
+* Themes:
+  * Add Paradise theme Cursor support
+* Contributors:
+  * [@nickesc](https://github.com/nickesc)
+
+# 1.1.59
+
+* Core:
+  * Update `window.controlsStyle` on Windows (resolves [#49](https://github.com/illixion/vscode-vibrancy-continued/issues/49))
+* Docs:
+  * Added a page with screenshots of various [Vibrancy Continued types](https://github.com/illixion/vscode-vibrancy-continued/blob/main/docs/vibrancy-types.md) (`vscode_vibrancy.type`)
+
+# 1.1.58
+
+* Themes:
+  * Fix for Paradise Smoked Glass aux-bar tabs and status-bar color
+* Contributors:
+  * [@nickesc](https://github.com/nickesc)
+
+# 1.1.57
+
+* Core:
+  * Added setting to force frameless VSCode window to fix rendering issues in some macOS environments (`vscode_vibrancy.forceFramelessWindow`)
+
+# 1.1.56
+
+* Core:
+  * Fixed startup crash when used on Trae.ai IDE (resolves [#201](https://github.com/illixion/vscode-vibrancy-continued/issues/201))
+* Themes:
+  * Added Paradise dark and light themes by [@nickesc](https://github.com/nickesc)
+* Contributors:
+  * [@nickesc](https://github.com/nickesc)
+
+# 1.1.55
+
+* Added Cursor themes by [@RobbieMinderhoud](https://github.com/RobbieMinderhoud) and [@cncn123](https://github.com/cncn123) (resolves [#176](https://github.com/illixion/vscode-vibrancy-continued/issues/176))
+  * These themes apply on top of Default Dark and Default Light
+  * They can be disabled via `vscode_vibrancy.disableThemeFixes`, and otherwise load before custom imports
+
+# 1.1.54
+
+* Added new workbench HTML location for VSCode 1.102.0-insider
+
+# 1.1.53
+
+* Added link to known errors and solutions in all error messages.
+
+# 1.1.52
+
+* Updated uninstall hook to also attempt to restore VSCode config settings
+
+# 1.1.51
+
+* Reduced package size to ~1 MB by not bundling dev dependencies
+* Allow frameless window mitigation to be disabled, which when combined with `--disable-gpu-compositing` on Windows resolves the issue with blurry text on VSCode 1.86 and newer
+
+# 1.1.50
+
+* Vibrancy will now attempt to automatically remove itself when uninstalled without running "Disable Vibrancy"
+  * This doesn't cover VSCode config changes for now
+* Reduced package size by not bundling node-gyp
+* Fixed a regression that caused activation errors on VSCode 1.85.2
+
+# 1.1.49
+
+* Updated uninstall hook message
+* Updated readme
+
+# 1.1.48
+
+* Fix activation bug related to Vibrancy installation and VSCode settings update
+
+# 1.1.47
+
+* Vibrancy will now update `window.systemColorTheme` and `window.autoDetectColorScheme` to fix issues related to dark/light mode auto detection, and restore them on uninstall (resolves [#165](https://github.com/illixion/vscode-vibrancy-continued/issues/165))
+
+# 1.1.46
+
+* Reduced package size by excluding unnecessary files
+* Added an alert when uninstalling without performing the "Disable Vibrancy" action
+
+# 1.1.45
+
+* Windows on ARM is now supported (resolves [#9](https://github.com/illixion/vscode-vibrancy-continued/issues/9))
+
+# 1.1.44
+
+* Updated the code responsible for updating terminal-related settings to restore original settings on uninstallation
+* Ensure terminal color changes are only applied only to the current profile ([#183](https://github.com/illixion/vscode-vibrancy-continued/issues/183))
+
+# 1.1.43
+
+* Update install blocking code to check Electron version directly in preparation for a future fix ([#178](https://github.com/illixion/vscode-vibrancy-continued/issues/178))
+
+# 1.1.42
+
+* Prevent installation on macOS and VSC 1.96.x ([#178](https://github.com/illixion/vscode-vibrancy-continued/issues/178))
+
+# 1.1.41
+
+* Fix incorrect syntax in non-ESM runtime, leading to crashing on Windows VSCode with certain versions
+
+# 1.1.40
+
+* Fix for VSCode 1.94 on Windows
+  * Refactored ESM code to account for different `import` behavior on Windows compared to macOS ([#166](https://github.com/illixion/vscode-vibrancy-continued/issues/166))
+* Fix for VSCode 1.95-insiders
+  * VSCode 1.95-insiders seems to have reverted the recent change to make workbench.html use ESM. This also restores support for older VSCode versions.
+
+# 1.1.39
+
+* Add VSCode 1.94 fixes from pre-release version
+
+# 1.1.38 (pre-release)
+
+* Added support for VSCode 1.94 (Insiders)
+* Refactored code to support the ESM version of workbench.html
+
+# 1.1.37
+
+* Fixed bug that prevented auto dark/light mode from detecting changes when VSCode is closed
+
+# 1.1.36
+
+* Automatically set terminal transparency (fix for VSCode 1.92, see [#155](https://github.com/illixion/vscode-vibrancy-continued/issues/155))
+
+# 1.1.35
+
+* Updated readme to enhance Windows warning visibility
+* No code changes
+
+# 1.1.34
+
+* Add changes from 1.1.33
+* Fix GitHub Actions workflow syntax that made previous version pre-release by accident
+
+# 1.1.33 (pre-release)
+
+* Fixed bug where minimap was not visible in the catppuccin mocha theme (PR [#134](https://github.com/illixion/vscode-vibrancy-continued/pull/134))
+
+# 1.1.32
+
+* Pre-releases now available
+* Main branch renamed
+* No code changes
+
+# 1.1.31
+
+* Fix automatic dark/light mode switch not working
+* Allow toggling auto dark/light mode setting
+
+# 1.1.30
+
+* Add automatic dark/light mode switch (PR [#146](https://github.com/illixion/vscode-vibrancy-continued/pull/146))
+
+# 1.1.29
+
+* Implement workaround for VSCode 1.86.x on Windows (bug [#122](https://github.com/illixion/vscode-vibrancy-continued/issues/122))
+
+# 1.1.28
+
+* Update readme with a notice for Windows users (bug [#122](https://github.com/illixion/vscode-vibrancy-continued/issues/122))
+* No code changes
+
+# 1.1.27
+
+* Clarified that light mode works as expected with new vibrancy types
+* Updated default type for light themes
+* Updated localization files
+
+# 1.1.26
+
+* Added all currently available BrowserWindow Electron types
+* Added deprecation notice for old themes
+* Updated themes to use the new types (since they're already available in VSCode 1.85)
+* Updated localization files
+
+# 1.1.25
+
+* Added `fullscreen-ui` and `under-window` types to fix Vibrancy on VSC 1.86 ([#116](https://github.com/illixion/vscode-vibrancy-continued/issues/116))
+
+# 1.1.24
+
+* Updated first load check to ignore extension patch updates ([#34](https://github.com/illixion/vscode-vibrancy-continued/issues/34))
+* Added a custom message for updates vs first time installation
+* Prevent installation on ARM Windows due to VSCode crashes ([#9](https://github.com/illixion/vscode-vibrancy-continued/issues/9))
+* Added GitHub Dark Default theme ([#102](https://github.com/illixion/vscode-vibrancy-continued/issues/102))
+
+# 1.1.23
+
+* Added "Custom theme" option to simplify development of new themes ([#106](https://github.com/illixion/vscode-vibrancy-continued/issues/106))
+
+# 1.1.22
+
+* Added Catppuccin Mocha theme ([#92](https://github.com/illixion/vscode-vibrancy-continued/issues/92))
+
+# 1.1.21
+
+* Updated Tokyo Night Storm theme to fix a few visual issues ([#81](https://github.com/illixion/vscode-vibrancy-continued/issues/81))
+* Fixed extension not working on Windows (VSCode 1.82.0) ([#95](https://github.com/illixion/vscode-vibrancy-continued/issues/95))
+
+# 1.1.20
+
+* Fix implementation bug of background window transparency on macOS
+
+# 1.1.19
+
+* Set visualEffectState of the VSCode window to enable transparency while not in focus on macOS
+
+# 1.1.18
+
+* Added support for Jupyter notebook files (by @dike-okayama)
+
+# 1.1.17
+
+* Added a more descriptive error when workbench.html is different from what is expected (fixes `ReferenceError: newHTML is not defined`)
+
+# 1.1.16
+
+* Added input validation to the opacity setting
+* Updated the description to clarify that -1 means use theme-specified opacity.
+
+# 1.1.15
+
+* Updated the install/uninstall function to work with VSCode v1.78.0
+
+# 1.1.14
+
+* No code changes, re-deploying a failed build due to a broken badge URL in README.
+
+# 1.1.13
+
+* Added new method to prevent window flashing when it's being resized. Enabled by default, but can be disabled in settings if it causes issues. Thanks [@arily](https://github.com/arily)!
+* Disable native window controls when enabling Vibrancy (Windows only)
+* Added a workaround for .node files being locked by VSCode as "in use", enabling/reloading Vibrancy now doesn't require manually deleting the `runtime` folder.
+* Code improvements
+
+# 1.1.12
+
+* Fix rimraf not working correctly on Windows by reimplementing a recursive delete ourselves
+
+# 1.1.11
+
+* Hotfix for extension not working due to an incorrect dependency being installed
+
+# 1.1.10
+
+* Switch to rimraf to clean the runtime folder before updating it (fixes EEXIST error on Windows)
+* Update Windows 10 fix to no longer cause issues with snapping
+
+# 1.1.9
+
+* Changed background transparency refresh interval to 10, which makes brief flashes when changing window size less noticeable
+
+* Added config option to control the background transparency refresh interval
+
+# 1.1.8
+
+* Moved custom imports loading to extension code, as it was broken before due to CSP
+
+# 1.1.7
+
+* Added new theme: Solarized Dark+
+
+# 1.1.6
+
+* Force extension to be local-only
+
+# 1.1.5
+
+* Added Tokyo Night Storm theme
+
+# 1.1.4
+
+* Fix disable action not fully restoring files
+* Fix inconsistent behavior when re-enabling
+* Change activation events to *
+
+# 1.1.3
+
+* Extension is no longer in preview
+
+# 1.1.2
+
+* Update readme
+
+# 1.1.1
+
+* Add Noir et blanc theme (by [pryter](https://github.com/pryter))
+
+# 1.1.0
+
+* Fix extension not working in VS Code 1.70.0 (by [slanterns](https://github.com/slanterns))
+* Update activation events
+* Extension is now maintained by [Illixion](https://github.com/illixion)
+
+# 1.0.16
+
+* fix: turn off gpuAcceleration
+* fix: vscode 1.57.0
+
+# 1.0.14
+
+* fix: not work with Customize UI
+
+# 1.0.13
+
+* fix: not working in vscode 1.53.0-insider
+
+# 1.0.12
+
+* feat: Add "Light (Only Subbar)" theme
+
+# 1.0.11
+
+* fix: Optimize the fullscreen style fixed #82
+
+# 1.0.10
+
+* New runtime implementation.
+* fix: win10 dragging lay
+* Remove win7 support
+
+# 1.0.9
+
+* fix: Disable auto restart
+* i18n: Add Japanese translations
+* fix: Support vscode 1.41.1
+
+# 1.0.8
+
+* fix: Support vscode 1.41.0
+
+# 1.0.7
+
+* fix: multiple pop-ups when color theme is changed
+* fix: opacity in win10
+* docs: Add macOS theme screenshots
+* docs: Add solution to removing [Unsupported] on VS Code's titlebar
+
+# 1.0.6
+
+* fix: Delete the wrong ',' in the generated html
+* feat: The opacity option is now also available for macos.
+By default, Macos has a background with opacity of 0.3.
+
+* feat: new light theme
+* fix: support import file path begin with 'file://'
+* feat: i18n zh-cn
+* feat: macos effect type
+You can change the effect type of macos, but generally 'auto' is the best.
+
+* fix: multiple pop-ups when config is changed
+
+
+# 1.0.5
+
+* fix: support v1.37.0
+* feat: auto config terminal renderer type
+If there is no "terminal.integrated.rendererType" in the global configuration, it will be set to "dom".
+
+* feat: auto restart vscode
+
+# 1.0.4
+
+* feat: theme system
+* feat: custom import css/js file
+* fix: Auto reload error when config is changed
+
+# 1.0.3
+
+* No longer dependent on the Visual C++ 2015
+* docs: update README
+
+# 1.0.2
+
+* feat: Windows7 support
+* feat: Configurable opacity
+* feat: User-friendly installation prompt dialog
+
+> Windows users please make sure you have [Visual C++ Redistributable Packages for Visual Studio 2015 x86](https://www.microsoft.com/en-us/download/details.aspx?id=48145) installed!
