@@ -1,6 +1,10 @@
 #include <napi.h>
 #include <dwmapi.h>
 
+namespace vibrancy_custom_blur {
+    HRESULT probeWindowTarget(HWND hwnd);
+}
+
 enum AccentState {
     ACCENT_DISABLED = 0,
     ACCENT_ENABLE_GRADIENT = 1,
@@ -122,11 +126,37 @@ void disableVibrancy(const Napi::CallbackInfo &info) {
     }
 }
 
+Napi::Value probeCustomBlurTarget(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+
+    if (info.Length() != 1 || !info[0].IsNumber()) {
+        Napi::TypeError::New(env, "WINDOW_NOT_GIVEN")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    HWND hWnd =
+        reinterpret_cast<HWND>(
+            info[0].As<Napi::Number>().Int64Value()
+        );
+
+    HRESULT hr =
+        vibrancy_custom_blur::probeWindowTarget(hWnd);
+
+    return Napi::Number::New(
+        env,
+        static_cast<int32_t>(hr)
+    );
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set(Napi::String::New(env, "setVibrancy"),
                 Napi::Function::New(env, setVibrancy));
     exports.Set(Napi::String::New(env, "disableVibrancy"),
                 Napi::Function::New(env, disableVibrancy));
+    exports.Set(Napi::String::New(env, "probeCustomBlurTarget"),
+                Napi::Function::New(env, probeCustomBlurTarget)
+    );
     return exports;
 }
 
