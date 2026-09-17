@@ -1,8 +1,9 @@
+
 import path from 'path';
 import electron from 'electron';
 /**
  * @type {(window) => Record<'interval' | 'overwrite', {install: () => void, uninstall: () => void>}
- */
+*/
 import transparencyMethods from './methods/index.mjs';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -26,7 +27,7 @@ import { fileURLToPath } from 'url';
  *    js: string
  *  }
  * }}
- */
+*/
 const app = global.vscode_vibrancy_plugin;
 // @ts-check
 
@@ -70,30 +71,40 @@ function backgroundMaterialForType(type) {
     case 'tabbed': return 'tabbed';
     case 'transparent': return 'none';
     case 'acrylic':
-    default: return 'acrylic';
-  }
+      default: return 'acrylic';
+    }
 }
-
+  
 /**
  * @param {string} hex
  * @returns {{ r: any; g: any; b: any; } | null}
- */
+*/
 function hexToRgb(hex) {
   var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   return result
-    ? {
-      r: parseInt(result[1], 16),
-      g: parseInt(result[2], 16),
-      b: parseInt(result[3], 16),
-    }
-    : null;
+  ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16),
+  }
+  : null;
+}
+
+function getNativeHwnd(window) {
+  const handle = window.getNativeWindowHandle();
+  
+  if (handle.length >= 8) {
+    return Number(handle.readBigUInt64LE(0));
+  }
+  
+  return handle.readUInt32LE(0);
 }
 
 electron.app.on('browser-window-created', (_, window) => {
   const methods = transparencyMethods(window);
   const hackMethod = app.config.preventFlash ? 'overwrite' : 'interval';
   const effects = methods[hackMethod];
-
+  
   var type = app.config.type;
   if (type !== 'auto') {
     if (!universalType.includes(type)) {
@@ -104,75 +115,128 @@ electron.app.on('browser-window-created', (_, window) => {
   if (type === 'auto') {
     type = app.theme.type[app.os];
   }
-
+  
   const isUniversalType = universalType.includes(type);
-
+  
   let opacity = app.config.opacity;
   // if opacity < 0, use the theme default opacity
   if (opacity < 0) {
     opacity = app.theme.opacity[app.os];
   }
-
+  
   const backgroundRGB = (app.config.backgroundOverride && hexToRgb(app.config.backgroundOverride))
-    || hexToRgb(app.theme.background)
-    || { r: 0, g: 0, b: 0 };
-
+  || hexToRgb(app.theme.background)
+  || { r: 0, g: 0, b: 0 };
+  
   if (app.os === 'win10') {
     if (app.win11) {
-      // Windows 11: use the modern DWM backdrop material (Mica / Acrylic / Tabbed)
-      // via Electron's BrowserWindow.setBackgroundMaterial. This composites on the
-      // GPU and has no per-frame blur cost, so it doesn't lag while dragging the
-      // way the legacy acrylic accent does on Win10 (issue #52). It also gives us
-      // Mica and Mica Alt support (issue #19).
-      const material = backgroundMaterialForType(type);
-      if (typeof window.setBackgroundMaterial === 'function') {
-        try {
-          window.setBackgroundMaterial(material);
-        } catch (err) {
-          console.error('setBackgroundMaterial failed:', err);
-        }
-      }
-    } else {
-      // Windows 10: legacy SetWindowCompositionAttribute accent.
-      const effect = type === 'transparent' ? ACCENT_TRANSPARENT : ACCENT_ACRYLIC;
       const require = createRequire(import.meta.url);
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = path.dirname(__filename);
-      const arch = process.arch; // 'x64', 'arm64', etc.
-
+      const arch = process.arch;
+      
       try {
         const addonPath = path.resolve(__dirname, `./vibrancy-${arch}.node`);
         const addon = require(addonPath);
-        const applyAccent = () => {
-          if (window.isDestroyed()) return;
-          addon.setVibrancy(
-            window.getNativeWindowHandle().readInt32LE(0),
-            effect,
-            backgroundRGB.r,
-            backgroundRGB.g,
-            backgroundRGB.b,
-            0
+        
+        const hwnd = getNativeHwnd(window);
+        const hr = addon.probeCustomBlurTarget(hwnd);
+        
+        console.log(
+          `[Vibrancy custom blur probe] HWND=${hwnd} HRESULT=0x${(hr >>> 0)
+            .toString(16)
+            .padStart(8, '0')}`
           );
-        };
-        applyAccent();
-
-        // ACCENT_ENABLE_ACRYLICBLURBEHIND lags badly while dragging on Win10, so
-        // drop it during move/resize and restore it once the window goes idle.
-        if (effect === ACCENT_ACRYLIC) {
-          import('./win-acrylic-drag.mjs')
+        } catch (err) {
+          console.error('[Vibrancy custom blur probe] failed:', err);
+        }
+        // Windows 11: use the modern DWM backdrop material (Mica / Acrylic / Tabbed)
+        // via Electron's BrowserWindow.setBackgroundMaterial. This composites on the
+        // GPU and has no per-frame blur cost, so it doesn't lag while dragging the
+        // way the legacy acrylic accent does on Win10 (issue #52). It also gives us
+        // Mica and Mica Alt support (issue #19).
+        const material = backgroundMaterialForType(type);
+        if (typeof window.setBackgroundMaterial === 'function') {
+          try {
+            window.setBackgroundMaterial(material);
+          } catch (err) {
+            console.error('setBackgroundMaterial failed:', err);
+          }
+        }
+      } else {
+        // Windows 10: legacy SetWindowCompositionAttribute accent.
+        const effect = type === 'transparent' ? ACCENT_TRANSPARENT : ACCENT_ACRYLIC;
+        const require = createRequire(import.meta.url);
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+        const arch = process.arch; // 'x64', 'arm64', etc.
+        
+        try {
+          const addonPath = path.resolve(__dirname, `./vibrancy-${arch}.node`);
+          const addon = require(addonPath);
+          const applyAccent = () => {
+            if (window.isDestroyed()) return;
+            addon.setVibrancy(
+              window.getNativeWindowHandle().readInt32LE(0),
+              effect,
+              backgroundRGB.r,
+              backgroundRGB.g,
+              backgroundRGB.b,
+              0
+            );
+          };
+          applyAccent();
+          
+          // ACCENT_ENABLE_ACRYLICBLURBEHIND lags badly while dragging on Win10, so
+          // drop it during move/resize and restore it once the window goes idle.
+          if (effect === ACCENT_ACRYLIC) {
+            import('./win-acrylic-drag.mjs')
             .then((module) => module.default(window, addon, applyAccent))
             .catch((error) => console.error('Error loading win-acrylic-drag:', error));
+          }
+        } catch (err) {
+          throw new Error(`Failed to load vibrancy addon for arch ${arch}. Error: ${err.message}`);
         }
-      } catch (err) {
-        throw new Error(`Failed to load vibrancy addon for arch ${arch}. Error: ${err.message}`);
       }
+      
+      window.webContents.once('dom-ready', () => {
+        const currentURL = window.webContents.getURL();
+        
+        if (
+          !(
+            currentURL.includes('workbench.html') ||
+            currentURL.includes('workbench.esm.html') ||
+            currentURL.includes('workbench-monkey-patch.html')
+          )
+        ) {
+          return;
+        }
+        
+        if (window.isMaximized()) {
+          window.unmaximize();
+          window.maximize();
+        }
+      });
     }
-
-    window.webContents.once('dom-ready', () => {
+    
+    window.on('closed', () => {
+      effects.uninstall();
+    });
+    
+    window.webContents.on('dom-ready', () => {
       const currentURL = window.webContents.getURL();
-
+      
+      // Floating editor windows (issue #115) are auxiliary windows opened as
+      // about:blank children of the workbench and populated via DOM calls from
+      // the opener; their container mirrors the main workbench's classes, so the
+      // theme CSS applies as-is. VSCode's main process only permits about:blank
+      // child windows, so this cannot match anything else. The URL reads as ''
+      // until the initial empty document commits, so accept both forms.
+      const isAuxiliaryWindow = currentURL === 'about:blank' || currentURL === '';
+      
       if (
         !(
+          isAuxiliaryWindow ||
           currentURL.includes('workbench.html') ||
           currentURL.includes('workbench.esm.html') ||
           currentURL.includes('workbench-monkey-patch.html')
@@ -180,159 +244,126 @@ electron.app.on('browser-window-created', (_, window) => {
       ) {
         return;
       }
-
-      if (window.isMaximized()) {
-        window.unmaximize();
-        window.maximize();
+      
+      window.setBackgroundColor('#00000000');
+      
+      effects.install();
+      
+      if (app.os === 'macos' && !isUniversalType) {
+        window.setVibrancy(type);
+        
+        // hack
+        const width = window.getBounds().width;
+        window.setBounds({
+          width: width + 1,
+        });
+        window.setBounds({
+          width,
+        });
       }
+      
+      injectHTML(window);
     });
-  }
-
-  window.on('closed', () => {
-    effects.uninstall();
   });
-
-  window.webContents.on('dom-ready', () => {
-    const currentURL = window.webContents.getURL();
-
-    // Floating editor windows (issue #115) are auxiliary windows opened as
-    // about:blank children of the workbench and populated via DOM calls from
-    // the opener; their container mirrors the main workbench's classes, so the
-    // theme CSS applies as-is. VSCode's main process only permits about:blank
-    // child windows, so this cannot match anything else. The URL reads as ''
-    // until the initial empty document commits, so accept both forms.
-    const isAuxiliaryWindow = currentURL === 'about:blank' || currentURL === '';
-
-    if (
-      !(
-        isAuxiliaryWindow ||
-        currentURL.includes('workbench.html') ||
-        currentURL.includes('workbench.esm.html') ||
-        currentURL.includes('workbench-monkey-patch.html')
-      )
-    ) {
-      return;
+  
+  function injectHTML(window) {
+    window.webContents.executeJavaScript(`(function(){
+      const vscodeVibrancyTTP = window.trustedTypes.createPolicy("VscodeVibrancyContinued", { createHTML (v) { return v; }});
+      
+      // Auxiliary (floating) windows stub document.createElement to throw
+      // (see VSCode's auxiliaryWindowService createContainer), so go through
+      // the prototype. Our containers are inert, so the "instanceof HTMLElement"
+      // concern behind that stub doesn't apply here.
+      const createElement = (tag) => Document.prototype.createElement.call(document, tag);
+      
+      document.getElementById("vscode-vibrancy-style")?.remove();
+      const styleElement = createElement("div");
+      styleElement.id = "vscode-vibrancy-style";
+      styleElement.innerHTML = vscodeVibrancyTTP.createHTML(${JSON.stringify(
+        styleHTML()
+      )});
+      document.body.appendChild(styleElement);
+      
+      document.getElementById("vscode-vibrancy-script")?.remove();
+      const scriptElement = createElement("div");
+      scriptElement.id = "vscode-vibrancy-script";
+      scriptElement.innerHTML = vscodeVibrancyTTP.createHTML(${JSON.stringify(
+        scriptHTML()
+      )});
+      document.body.appendChild(scriptElement);
+      })();`);
+    }
+    
+    
+    function scriptHTML() {
+      return app.imports.js;
     }
 
-    window.setBackgroundColor('#00000000');
-
-    effects.install();
-
-    if (app.os === 'macos' && !isUniversalType) {
-      window.setVibrancy(type);
-
-      // hack
-      const width = window.getBounds().width;
-      window.setBounds({
-        width: width + 1,
-      });
-      window.setBounds({
-        width,
-      });
-    }
-
-    injectHTML(window);
-  });
-});
-
-function injectHTML(window) {
-  window.webContents.executeJavaScript(`(function(){
-    const vscodeVibrancyTTP = window.trustedTypes.createPolicy("VscodeVibrancyContinued", { createHTML (v) { return v; }});
-
-    // Auxiliary (floating) windows stub document.createElement to throw
-    // (see VSCode's auxiliaryWindowService createContainer), so go through
-    // the prototype. Our containers are inert, so the "instanceof HTMLElement"
-    // concern behind that stub doesn't apply here.
-    const createElement = (tag) => Document.prototype.createElement.call(document, tag);
-
-    document.getElementById("vscode-vibrancy-style")?.remove();
-    const styleElement = createElement("div");
-    styleElement.id = "vscode-vibrancy-style";
-    styleElement.innerHTML = vscodeVibrancyTTP.createHTML(${JSON.stringify(
-    styleHTML()
-  )});
-    document.body.appendChild(styleElement);
-
-    document.getElementById("vscode-vibrancy-script")?.remove();
-    const scriptElement = createElement("div");
-    scriptElement.id = "vscode-vibrancy-script";
-    scriptElement.innerHTML = vscodeVibrancyTTP.createHTML(${JSON.stringify(
-    scriptHTML()
-  )});
-    document.body.appendChild(scriptElement);
-  })();`);
-}
-
-
-function scriptHTML() {
-  return app.imports.js;
-}
-
-function styleHTML() {
-  if (app.os === 'unknown') return '';
-
-  var type = app.config.type;
-  if (type === 'auto') {
-    type = app.theme.type[app.os];
-  }
-
-  let opacity = app.config.opacity;
-
-  if (opacity < 0) {
-    opacity = app.theme.opacity[app.os];
-  }
-
-  const themeBackgroundRGB = hexToRgb(app.theme.background) || { r: 0, g: 0, b: 0 };
-  const overrideRGB = app.config.backgroundOverride ? hexToRgb(app.config.backgroundOverride) : null;
-  const backgroundRGB = overrideRGB || themeBackgroundRGB;
-
-  // When background override is set, recolor the theme CSS so element backgrounds
-  // (sidebar, tabs, lists, etc.) use the override color instead of the theme's gray.
-  let themeCSS = app.themeCSS;
-  if (overrideRGB) {
-    const recolorCSS = (css, fromRGB, toRGB) => {
-      // Replace rgba(R, G, B, A) and rgb(R, G, B) where RGB is close to the theme background
-      css = css.replace(
-        /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/g,
-        (match, rs, gs, bs) => {
-          const r = parseInt(rs), g = parseInt(gs), b = parseInt(bs);
-          const dist = Math.abs(r - fromRGB.r) + Math.abs(g - fromRGB.g) + Math.abs(b - fromRGB.b);
-          if (dist < 60) {
-            const prefix = match.startsWith('rgba') ? 'rgba(' : 'rgb(';
-            return `${prefix}${toRGB.r}, ${toRGB.g}, ${toRGB.b}`;
-          }
-          return match;
-        }
-      );
-      // Replace #RRGGBB hex colors close to the theme background
-      css = css.replace(
-        /#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})\b/g,
-        (match, rh, gh, bh) => {
-          const r = parseInt(rh, 16), g = parseInt(gh, 16), b = parseInt(bh, 16);
-          const dist = Math.abs(r - fromRGB.r) + Math.abs(g - fromRGB.g) + Math.abs(b - fromRGB.b);
-          if (dist < 60) {
-            const hex = (n) => n.toString(16).padStart(2, '0');
-            return `#${hex(toRGB.r)}${hex(toRGB.g)}${hex(toRGB.b)}`;
-          }
-          return match;
-        }
-      );
-      return css;
-    };
-    themeCSS = recolorCSS(themeCSS, themeBackgroundRGB, overrideRGB);
-  }
-
-  const HTML = [
-    `
-    <style>
-      html {
-        background: rgba(${backgroundRGB.r},${backgroundRGB.g},${backgroundRGB.b},${opacity}) !important;
+    function styleHTML() {
+      if (app.os === 'unknown') return '';
+      
+      var type = app.config.type;
+      if (type === 'auto') {
+        type = app.theme.type[app.os];
       }
-      ${themeCSS}
-    </style>
-    `,
-    app.imports.css,
-  ];
-
-  return HTML.join('');
-}
+      
+      let opacity = app.config.opacity;
+      
+      if (opacity < 0) {
+        opacity = app.theme.opacity[app.os];
+      }
+      
+      const themeBackgroundRGB = hexToRgb(app.theme.background) || { r: 0, g: 0, b: 0 };
+      const overrideRGB = app.config.backgroundOverride ? hexToRgb(app.config.backgroundOverride) : null;
+      const backgroundRGB = overrideRGB || themeBackgroundRGB;
+      
+      // When background override is set, recolor the theme CSS so element backgrounds
+      // (sidebar, tabs, lists, etc.) use the override color instead of the theme's gray.
+      let themeCSS = app.themeCSS;
+      if (overrideRGB) {
+        const recolorCSS = (css, fromRGB, toRGB) => {
+          // Replace rgba(R, G, B, A) and rgb(R, G, B) where RGB is close to the theme background
+          css = css.replace(
+            /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/g,
+            (match, rs, gs, bs) => {
+              const r = parseInt(rs), g = parseInt(gs), b = parseInt(bs);
+              const dist = Math.abs(r - fromRGB.r) + Math.abs(g - fromRGB.g) + Math.abs(b - fromRGB.b);
+              if (dist < 60) {
+                const prefix = match.startsWith('rgba') ? 'rgba(' : 'rgb(';
+                return `${prefix}${toRGB.r}, ${toRGB.g}, ${toRGB.b}`;
+              }
+              return match;
+            }
+          );
+          // Replace #RRGGBB hex colors close to the theme background
+          css = css.replace(
+            /#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})\b/g,
+            (match, rh, gh, bh) => {
+              const r = parseInt(rh, 16), g = parseInt(gh, 16), b = parseInt(bh, 16);
+              const dist = Math.abs(r - fromRGB.r) + Math.abs(g - fromRGB.g) + Math.abs(b - fromRGB.b);
+              if (dist < 60) {
+                const hex = (n) => n.toString(16).padStart(2, '0');
+                return `#${hex(toRGB.r)}${hex(toRGB.g)}${hex(toRGB.b)}`;
+              }
+              return match;
+            }
+          );
+          return css;
+        };
+        themeCSS = recolorCSS(themeCSS, themeBackgroundRGB, overrideRGB);
+      }
+      
+      const HTML = [
+        `
+        <style>
+        html {
+          background: rgba(${backgroundRGB.r},${backgroundRGB.g},${backgroundRGB.b},${opacity}) !important;
+          }
+          ${themeCSS}
+          </style>
+          `,
+          app.imports.css,
+        ];
+        
+        return HTML.join('');
+      }
