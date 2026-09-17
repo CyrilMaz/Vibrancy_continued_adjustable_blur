@@ -85,6 +85,16 @@ function hexToRgb(hex) {
     : null;
 }
 
+function getNativeHwnd(window) {
+  const handle = window.getNativeWindowHandle();
+
+  if (handle.length >= 8) {
+    return Number(handle.readBigUInt64LE(0));
+  }
+
+  return handle.readUInt32LE(0);
+}
+
 electron.app.on('browser-window-created', (_, window) => {
   const methods = transparencyMethods(window);
   const hackMethod = app.config.preventFlash ? 'overwrite' : 'interval';
@@ -166,6 +176,20 @@ electron.app.on('browser-window-created', (_, window) => {
         window.maximize();
       }
     });
+  }
+
+  try {
+  const bindings = require('./vibrancy.cjs');
+  const hwnd = getNativeHwnd(window);
+  const hr = bindings.probeCustomBlurTarget(hwnd);
+
+  console.log(
+    `[Vibrancy custom blur probe] HWND=${hwnd} HRESULT=0x${(hr >>> 0)
+      .toString(16)
+      .padStart(8, '0')}`
+  );
+  } catch (err) {
+    console.error('[Vibrancy custom blur probe] failed:', err);
   }
 
   window.on('closed', () => {
