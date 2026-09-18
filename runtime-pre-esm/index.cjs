@@ -181,6 +181,22 @@ electron.app.on('browser-window-created', (_, window) => {
     });
   }
 
+  // Electron transparent frameless windows do not participate in native Aero Snap
+  // on Windows. Recreate the useful left/right/top edge behavior while
+  // preserving the working transparent + custom-blur path.
+  if (
+    app.os === 'win10' &&
+    type === 'transparent' &&
+    app.config.windowMode === 'frameless-transparent'
+  ) {
+    try {
+      const installTransparentWindowSnap = require('./win-transparent-snap.cjs');
+      installTransparentWindowSnap(window, electron.screen);
+    } catch (err) {
+      console.error('[Vibrancy transparent snap] failed:', err);
+    }
+  }
+
   window.on('closed', () => {
     effects.uninstall();
   });
