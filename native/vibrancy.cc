@@ -3,6 +3,7 @@
 
 namespace vibrancy_custom_blur {
     HRESULT probeWindowTarget(HWND hwnd);
+    HRESULT enableCustomBlur(HWND hwnd, float blurAmount);
 }
 
 enum AccentState {
@@ -126,6 +127,39 @@ void disableVibrancy(const Napi::CallbackInfo &info) {
     }
 }
 
+Napi::Value enableCustomBlur(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+
+    if (
+        info.Length() != 2 ||
+        !info[0].IsNumber() ||
+        !info[1].IsNumber()
+    ) {
+        Napi::TypeError::New(env, "WINDOW_AND_BLUR_AMOUNT_REQUIRED")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    HWND hWnd =
+        reinterpret_cast<HWND>(
+            info[0].As<Napi::Number>().Int64Value()
+        );
+
+    float blurAmount =
+        info[1].As<Napi::Number>().FloatValue();
+
+    HRESULT hr =
+        vibrancy_custom_blur::enableCustomBlur(
+            hWnd,
+            blurAmount
+        );
+
+    return Napi::Number::New(
+        env,
+        static_cast<int32_t>(hr)
+    );
+}
+
 Napi::Value probeCustomBlurTarget(const Napi::CallbackInfo &info) {
     Napi::Env env = info.Env();
 
@@ -154,6 +188,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
                 Napi::Function::New(env, setVibrancy));
     exports.Set(Napi::String::New(env, "disableVibrancy"),
                 Napi::Function::New(env, disableVibrancy));
+    exports.Set(Napi::String::New(env, "enableCustomBlur"),
+                Napi::Function::New(env, enableCustomBlur));
     exports.Set(Napi::String::New(env, "probeCustomBlurTarget"),
                 Napi::Function::New(env, probeCustomBlurTarget)
     );

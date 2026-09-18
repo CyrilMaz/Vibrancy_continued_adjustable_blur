@@ -14,7 +14,9 @@
         "-O3"
       ],
       "libraries": [
-        "windowsapp.lib"
+        "windowsapp.lib",
+        "d2d1.lib",
+        "dxguid.lib"
       ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")"

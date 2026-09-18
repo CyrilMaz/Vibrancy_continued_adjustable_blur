@@ -127,7 +127,10 @@ electron.app.on('browser-window-created', (_, window) => {
     // Windows 11 with a recent enough Electron: use the modern DWM backdrop
     // material (Mica / Acrylic / Tabbed). No per-frame blur cost, so no drag lag
     // (issue #52), and it enables Mica/Mica Alt (issue #19).
-    if (app.win11 && typeof window.setBackgroundMaterial === 'function') {
+    if (
+      app.win11 &&
+      typeof window.setBackgroundMaterial === 'function'
+    ) {
       try {
         window.setBackgroundMaterial(backgroundMaterialForType(type));
       } catch (err) {
@@ -178,20 +181,6 @@ electron.app.on('browser-window-created', (_, window) => {
     });
   }
 
-  try {
-  const bindings = require('./vibrancy.cjs');
-  const hwnd = getNativeHwnd(window);
-  const hr = bindings.probeCustomBlurTarget(hwnd);
-
-  console.log(
-    `[Vibrancy custom blur probe] HWND=${hwnd} HRESULT=0x${(hr >>> 0)
-      .toString(16)
-      .padStart(8, '0')}`
-  );
-  } catch (err) {
-    console.error('[Vibrancy custom blur probe] failed:', err);
-  }
-
   window.on('closed', () => {
     effects.uninstall();
   });
@@ -220,6 +209,25 @@ electron.app.on('browser-window-created', (_, window) => {
     window.setBackgroundColor('#00000000');
 
     effects.install();
+
+    try {
+      const bindings = require('./vibrancy.cjs');
+      const hwnd = getNativeHwnd(window);
+
+      const blurRadius = Number.isFinite(app.config.blurRadius)
+        ? Math.max(0, Math.min(50, app.config.blurRadius))
+        : 1;
+
+      const hrDom = bindings.enableCustomBlur(hwnd, blurRadius);
+
+      console.log(
+        `[Vibrancy custom blur dom-ready] HRESULT=0x${(hrDom >>> 0)
+          .toString(16)
+          .padStart(8, '0')}`
+      );
+    } catch (err) {
+      console.error('[Vibrancy custom blur dom-ready] failed:', err);
+    }
 
     if (app.os === 'macos' && !isUniversalType) {
       window.setVibrancy(type);
