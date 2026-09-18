@@ -237,24 +237,38 @@ namespace vibrancy_custom_blur
 
             );
 
-            auto systemBackdrop =
-            state.target.try_as<
-                winrt::Windows::UI::Composition::ICompositionSupportsSystemBackdrop
-            >();
+            // Attach a real visual tree to the DesktopWindowTarget.
+            // This is the path that lets a transparent Electron window show
+            // our HostBackdropBrush + Gaussian blur behind Chromium content.
+            state.root =
+                g_compositor.CreateContainerVisual();
 
-            if (!systemBackdrop)
-            {
-                state.target.Close();
-                return E_NOINTERFACE;
-            }
+            state.root.RelativeSizeAdjustment(
+                { 1.0f, 1.0f }
+            );
+
+            state.visual =
+                g_compositor.CreateSpriteVisual();
+
+            state.visual.RelativeSizeAdjustment(
+                { 1.0f, 1.0f }
+            );
 
             state.effectBrush =
                 createBlurBrush(
                     blurAmount
                 );
 
-            systemBackdrop.SystemBackdrop(
+            state.visual.Brush(
                 state.effectBrush
+            );
+
+            state.root.Children().InsertAtTop(
+                state.visual
+            );
+
+            state.target.Root(
+                state.root
             );
 
             g_windowStates.emplace(
