@@ -18,6 +18,7 @@ Opacity          0.18
 Backdrop / Blur  3
 Window type      transparent
 Window mode      frameless-transparent
+Window controls  custom
 Theme preset     Default Dark
 Terminal GPU     off
 ```
@@ -37,11 +38,27 @@ You need:
 
 The Windows x64 native module is already included in the repository, so you do **not** need Visual Studio Build Tools just to install and use the extension.
 
-Run these 4 commands:
+## Recommended source location
+
+I recommend keeping the cloned source repository here:
+
+```text
+C:\Users\<YourName>\.vscode\Vibrancy_continued_adjustable_blur
+```
+
+This keeps the project close to your VS Code files while staying separate from extensions installed by VS Code.
+
+> **Do not clone the repository into `.vscode\extensions`.**
+>
+> `.vscode\extensions` is managed by VS Code itself.
+>
+> Keep the source repository directly under `.vscode`, and let `npm run install:local` install the packaged extension into the proper extension directory.
+
+Run these 4 commands in PowerShell:
 
 ```powershell
-git clone https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur.git
-cd Vibrancy_continued_adjustable_blur
+git clone https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur.git "$HOME\.vscode\Vibrancy_continued_adjustable_blur"
+cd "$HOME\.vscode\Vibrancy_continued_adjustable_blur"
 npm install
 npm run install:local
 ```
@@ -67,6 +84,12 @@ That's it.
 # Want to modify it?
 
 Everything important is inside the cloned repository.
+
+With the recommended location, that means:
+
+```text
+C:\Users\<YourName>\.vscode\Vibrancy_continued_adjustable_blur
+```
 
 ## Change the default blur / opacity / window mode
 
@@ -106,6 +129,12 @@ Edit:
 themes/Default Dark.json
 ```
 
+Full recommended path:
+
+```text
+C:\Users\<YourName>\.vscode\Vibrancy_continued_adjustable_blur\themes\Default Dark.json
+```
+
 This is where the default VS Code `workbench.colorCustomizations` preset is defined.
 
 For example:
@@ -138,6 +167,12 @@ Edit:
 themes/Default Dark.css
 ```
 
+Full recommended path:
+
+```text
+C:\Users\<YourName>\.vscode\Vibrancy_continued_adjustable_blur\themes\Default Dark.css
+```
+
 This controls things such as:
 
 ```text
@@ -163,6 +198,12 @@ Edit:
 native/custom-blur.cc
 ```
 
+Full recommended path:
+
+```text
+C:\Users\<YourName>\.vscode\Vibrancy_continued_adjustable_blur\native\custom-blur.cc
+```
+
 This contains the Windows Composition implementation used for the custom backdrop.
 
 If you modify this file, you must rebuild the native module.
@@ -175,6 +216,12 @@ Edit:
 
 ```text
 runtime-pre-esm/win-transparent-snap.cjs
+```
+
+Full recommended path:
+
+```text
+C:\Users\<YourName>\.vscode\Vibrancy_continued_adjustable_blur\runtime-pre-esm\win-transparent-snap.cjs
 ```
 
 This controls:
@@ -197,6 +244,12 @@ Edit:
 runtime-pre-esm/index.cjs
 ```
 
+Full recommended path:
+
+```text
+C:\Users\<YourName>\.vscode\Vibrancy_continued_adjustable_blur\runtime-pre-esm\index.cjs
+```
+
 This connects the Electron window to the native backdrop implementation and injects the glass CSS variables.
 
 ---
@@ -207,6 +260,12 @@ Edit:
 
 ```text
 extension/vscode-settings.js
+```
+
+Full recommended path:
+
+```text
+C:\Users\<YourName>\.vscode\Vibrancy_continued_adjustable_blur\extension\vscode-settings.js
 ```
 
 This is responsible for things such as:
@@ -224,7 +283,7 @@ theme-related settings
 # For the brave who want to lose their sanity  #
 # ##############################################
 
-Here are the details.
+Here are all the details.
 
 ---
 
@@ -537,7 +596,7 @@ package.json
 
 you do **not** need to rebuild the C++ module.
 
-Just run:
+Just run this from the repository root:
 
 ```powershell
 npm run install:local
@@ -600,15 +659,67 @@ Quick reference:
 
 ---
 
-# Installed VS Code files
+# Source repository vs installed extension
 
-The source repository and the installed VS Code application are two different things.
+These are two different locations.
 
-Your repository can be anywhere, for example:
+## Source repository
+
+Recommended location:
 
 ```text
-C:\Users\YourName\Documents\Vibrancy_continued_adjustable_blur\
+C:\Users\YourName\.vscode\Vibrancy_continued_adjustable_blur\
 ```
+
+This contains the source code you cloned from GitHub:
+
+```text
+package.json
+extension\
+native\
+runtime-pre-esm\
+themes\
+```
+
+You can edit, rebuild and update this directory with Git.
+
+## Installed VS Code extensions
+
+VS Code-managed extensions are normally stored under:
+
+```text
+C:\Users\YourName\.vscode\extensions\
+```
+
+For example:
+
+```text
+C:\Users\YourName\.vscode\extensions\...
+```
+
+Do **not** manually clone this repository into that directory.
+
+Let:
+
+```powershell
+npm run install:local
+```
+
+build the VSIX and let VS Code install it there.
+
+In short:
+
+```text
+C:\Users\YourName\.vscode\
+│
+├── Vibrancy_continued_adjustable_blur\   ← source repository, managed by you / Git
+│
+└── extensions\                           ← installed extensions, managed by VS Code
+```
+
+---
+
+# VS Code user settings
 
 VS Code user settings are usually located at:
 
@@ -616,11 +727,19 @@ VS Code user settings are usually located at:
 %APPDATA%\Code\User\settings.json
 ```
 
-which expands roughly to:
+which normally expands to:
 
 ```text
 C:\Users\YourName\AppData\Roaming\Code\User\settings.json
 ```
+
+The default preset in this fork is designed so you normally do **not** need to manually copy a large `workbench.colorCustomizations` block into this file.
+
+The extension generates the relevant colors when Vibrancy is applied.
+
+---
+
+# Installed VS Code application
 
 The installed VS Code application is usually somewhere under:
 
@@ -635,6 +754,25 @@ Reload Vibrancy
 ```
 
 You normally should **not** edit those installed files manually.
+
+So there are three separate locations to keep in mind:
+
+```text
+SOURCE REPOSITORY
+C:\Users\YourName\.vscode\Vibrancy_continued_adjustable_blur\
+
+INSTALLED EXTENSIONS
+C:\Users\YourName\.vscode\extensions\
+
+VS CODE USER SETTINGS
+C:\Users\YourName\AppData\Roaming\Code\User\settings.json
+```
+
+And VS Code itself is normally somewhere under:
+
+```text
+C:\Users\YourName\AppData\Local\Programs\Microsoft VS Code\
+```
 
 ---
 
@@ -804,16 +942,16 @@ runtime-pre-esm/win-transparent-snap.cjs
 https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur
 ```
 
-HTTPS:
+HTTPS — recommended Windows source location:
 
 ```powershell
-git clone https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur.git
+git clone https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur.git "$HOME\.vscode\Vibrancy_continued_adjustable_blur"
 ```
 
 SSH:
 
 ```powershell
-git clone git@github.com:CyrilMaz/Vibrancy_continued_adjustable_blur.git
+git clone git@github.com:CyrilMaz/Vibrancy_continued_adjustable_blur.git "$HOME\.vscode\Vibrancy_continued_adjustable_blur"
 ```
 
 ---
@@ -840,14 +978,10 @@ custom Snap support
 a lighter configurable glass appearance
 ```
 
+---
 
+Also, don't blame me for using AI.
+This project was originally made for personal use, but I decided to share it freely.
+So enjoy vscode with your live wallpaper — whether you're using Lively Wallpaper, Wallpaper Engine, or anything else.
 
-
-
-
-
-
-
-
-also, do not blame me for using AI, this projet was for personal use only, but I decided to share it freely so, enjoy being on vscode with lively wallpaper as I do or with wallpaper engine.
 <3
