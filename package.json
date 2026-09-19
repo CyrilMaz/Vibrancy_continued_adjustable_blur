@@ -60,7 +60,7 @@
         "vscode_vibrancy.type": {
           "description": "%configuration.type.description%",
           "type": "string",
-          "default": "auto",
+          "default": "transparent",
           "enum": [
             "auto",
             "acrylic",
@@ -115,16 +115,16 @@
           ]
         },
         "vscode_vibrancy.opacity": {
-          "description": "%configuration.opacity.description%",
-          "type": "number",
-          "default": -1,
-          "minimum": -1,
-          "maximum": 1
+        "description": "%configuration.opacity.description%",
+        "type": "number",
+        "default": 0.18,
+        "minimum": -1,
+        "maximum": 1
         },
         "vscode_vibrancy.blurRadius": {
-        "description": "Custom Windows blur radius in pixels.",
+        "description": "Windows HostBackdrop intensity.",
         "type": "number",
-        "default": 1,
+        "default": 3,
         "minimum": 0,
         "maximum": 50
         },
@@ -233,21 +233,21 @@
           "default": true
         },
         "vscode_vibrancy.windowMode": {
-          "description": "%configuration.windowMode.description%",
-          "type": "string",
-          "enum": [
+        "description": "%configuration.windowMode.description%",
+        "type": "string",
+        "enum": [
             "auto",
             "framed",
             "frameless",
             "frameless-transparent"
-          ],
-          "enumDescriptions": [
+        ],
+        "enumDescriptions": [
             "%configuration.windowMode.auto%",
             "%configuration.windowMode.framed%",
             "%configuration.windowMode.frameless%",
             "%configuration.windowMode.framelessTransparent%"
-          ],
-          "default": "auto"
+        ],
+        "default": "frameless-transparent"
         },
         "vscode_vibrancy.windowControlsStyle": {
           "description": "%configuration.windowControlsStyle.description%",
@@ -264,7 +264,7 @@
             "%configuration.windowControlsStyle.hidden%",
             "%configuration.windowControlsStyle.native%"
           ],
-          "default": "auto"
+          "default": "custom"
         },
         "vscode_vibrancy.forceFramelessWindow": {
           "description": "%configuration.forceFramelessWindow.description%",
