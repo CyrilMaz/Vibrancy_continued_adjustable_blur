@@ -300,7 +300,9 @@
     "test:unit": "vitest run test/unit",
     "test:integration": "vitest run test/integration",
     "test:e2e": "node test/e2e/run-e2e.js",
-    "bump": "npm version --no-git-tag-version --no-commit"
+    "bump": "npm version --no-git-tag-version --no-commit",
+    "package:vsix": "npx -y @vscode/vsce package --out vscode-vibrancy-adjustable-blur.vsix",
+    "install:local": "npm run package:vsix && code --install-extension ./vscode-vibrancy-adjustable-blur.vsix --force"
   },
   "dependencies": {
     "fs-extra": "^10.1.0",

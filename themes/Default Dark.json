@@ -4,12 +4,50 @@
     "macos": "under-window",
     "linux": "transparent"
   },
+
   "background": "1e1e1e",
+
   "opacity": {
     "win10": 0.8,
     "macos": 0.3,
     "linux": 0.8
   },
+
   "colorTheme": "Default Dark+",
-  "systemColorTheme": "dark"
+  "systemColorTheme": "dark",
+
+  "colorCustomizations": {
+    "editorPane.background": "#1e1e1e00",
+    "editorGroupHeader.tabsBackground": "#1e1e1e00",
+    "editorGroupHeader.noTabsBackground": "#1e1e1e00",
+    "breadcrumb.background": "#1e1e1e00",
+    "editorGutter.background": "#1e1e1e00",
+    "panel.background": "#1e1e1e00",
+    "tab.activeBackground": "#1e1e1e00",
+    "tab.unfocusedActiveBackground": "#1e1e1e00",
+
+    "sideBar.background": "#1e1e1e2e",
+    "sideBarTitle.background": "#1e1e1e2e",
+    "activityBar.background": "#1e1e1e2e",
+    "editor.background": "#1e1e1e2e",
+    "tab.inactiveBackground": "#1e1e1e2e",
+    "tab.unfocusedInactiveBackground": "#1e1e1e2e",
+
+    "editorStickyScroll.background": "#1e1e1e2e",
+    "editorStickyScrollGutter.background": "#1e1e1e2e",
+    "sideBarStickyScroll.background": "#1e1e1e2e",
+    "panelStickyScroll.background": "#1e1e1e2e",
+    "terminalStickyScroll.background": "#1e1e1e2e",
+
+    "inlineChat.background": "#1e1e1e2e",
+    "editorWidget.background": "#1e1e1e2e",
+    "editorHoverWidget.background": "#1e1e1e2e",
+    "editorSuggestWidget.background": "#1e1e1e2e",
+    "notifications.background": "#1e1e1e2e",
+    "notificationCenterHeader.background": "#1e1e1e2e",
+
+    "menu.background": "#1e1e1e5e",
+
+    "quickInput.background": "#1e1e1e2e"
+  }
 }
