@@ -2,18 +2,30 @@
 
 This extension makes **Visual Studio Code genuinely transparent on Windows 11**, with an adjustable Windows backdrop effect, a lightweight glass look, and working drag-to-edge Snap behavior.
 
+## Preview
+
 <p align="center">
-  <a href="https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur/releases/download/v1.0.0/preview-full.mp4">
-    <img
-      src="https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur/releases/download/v1.0.0/vibrancy-demo-github-light.gif"
-      alt="Vibrancy Continued — Adjustable Blur preview"
-      width="900"
-    >
-  </a>
+  <img
+    src="https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur/releases/download/v1.0.0/preview-1.gif"
+    alt="Vibrancy Continued — Preview 1"
+    width="900"
+  >
 </p>
 
 <p align="center">
-  <sub>Click the preview to open the full-quality video.</sub>
+  <img
+    src="https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur/releases/download/v1.0.0/preview-2.gif"
+    alt="Vibrancy Continued — Preview 2"
+    width="900"
+  >
+</p>
+
+<p align="center">
+  <img
+    src="https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur/releases/download/v1.0.0/preview-3.gif"
+    alt="Vibrancy Continued — Preview 3"
+    width="900"
+  >
 </p>
 
 In practical terms:
