@@ -19,3 +19,6 @@ yarn.lock
 # Native prebuilts
 native/prebuilt/*.node
 !native/prebuilt/vibrancy-x64.node
+
+# Local native build file
+/binding.gyp
