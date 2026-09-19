@@ -859,6 +859,54 @@ Use one window-transparency system at a time.
 
 ---
 
+# Uninstallation
+
+To remove Vibrancy cleanly, disable it **before uninstalling the extension**.
+
+In VS Code:
+
+```text
+Ctrl + Shift + P
+```
+
+Run:
+
+```text
+Disable Vibrancy
+```
+
+Then fully restart Visual Studio Code.
+
+`Disable Vibrancy` reverts the changes made to VS Code's internal files and restores the previous settings that were saved when Vibrancy was enabled.
+
+After VS Code has restarted, uninstall the extension normally from the Extensions panel.
+
+If you installed this fork from a VSIX, you can also remove it from the command line:
+
+```powershell
+code --uninstall-extension CyrilMaz.vscode-vibrancy-adjustable-blur
+```
+
+If you cloned the source repository manually and no longer need it, you may then delete:
+
+```text
+C:\Users\<YourName>\.vscode\Vibrancy_continued_adjustable_blur
+```
+
+## Important
+
+Do not simply delete the extension files while Vibrancy is still enabled.
+
+Vibrancy patches files inside the VS Code installation. Running `Disable Vibrancy` first ensures those changes are reverted cleanly.
+
+If the extension was already removed before Vibrancy was disabled, reinstall the VSIX, run:
+
+```text
+Disable Vibrancy
+```
+
+restart VS Code, then uninstall the extension again.
+
 # Troubleshooting
 
 ## No transparency
