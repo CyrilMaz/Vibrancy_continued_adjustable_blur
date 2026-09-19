@@ -72,6 +72,12 @@ Ctrl + Shift + P
 Run:
 
 ```text
+Enable Vibrancy
+```
+
+Or
+
+```text
 Reload Vibrancy
 ```
 
