@@ -1,13 +1,11 @@
 {
-  "name": "vscode-vibrancy-continued",
-  "displayName": "Vibrancy Continued",
-  "description": "Vibrancy Effect for Visual Studio Code",
-  "version": "1.1.93",
-  "publisher": "illixion",
+  "name": "vscode-vibrancy-adjustable-blur",
+  "displayName": "Vibrancy Continued — Adjustable Blur",
+  "description": "Vibrancy Effect for Visual Studio Code with adjustable Windows blur",
+  "version": "1.0.0",
+  "publisher": "CyrilMaz",
   "author": {
-    "email": "illixion@illixion.com",
-    "name": "illixion",
-    "url": "https://illixion.com"
+    "name": "CyrilMaz"
   },
   "engines": {
     "vscode": "^1.63.0"
@@ -18,15 +16,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/illixion/vscode-vibrancy-continued"
+    "url": "https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur"
   },
   "bugs": {
-    "url": "https://github.com/illixion/vscode-vibrancy-continued/issues"
+    "url": "https://github.com/CyrilMaz/Vibrancy_continued_adjustable_blur/issues"
   },
-  "sponsor": {
-    "url": "https://github.com/sponsors/illixion"
-  },
-  "qna": "https://github.com/illixion/vscode-vibrancy-continued/discussions/categories/q-a",
   "preview": false,
   "icon": "images/logo.png",
   "extensionKind": [
@@ -115,18 +109,18 @@
           ]
         },
         "vscode_vibrancy.opacity": {
-        "description": "%configuration.opacity.description%",
-        "type": "number",
-        "default": 0.18,
-        "minimum": -1,
-        "maximum": 1
+          "description": "%configuration.opacity.description%",
+          "type": "number",
+          "default": 0.18,
+          "minimum": -1,
+          "maximum": 1
         },
         "vscode_vibrancy.blurRadius": {
-        "description": "Windows HostBackdrop intensity.",
-        "type": "number",
-        "default": 3,
-        "minimum": 0,
-        "maximum": 50
+          "description": "Windows HostBackdrop intensity.",
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 50
         },
         "vscode_vibrancy.backgroundOverride": {
           "description": "%configuration.backgroundOverride.description%",
@@ -233,21 +227,21 @@
           "default": true
         },
         "vscode_vibrancy.windowMode": {
-        "description": "%configuration.windowMode.description%",
-        "type": "string",
-        "enum": [
+          "description": "%configuration.windowMode.description%",
+          "type": "string",
+          "enum": [
             "auto",
             "framed",
             "frameless",
             "frameless-transparent"
-        ],
-        "enumDescriptions": [
+          ],
+          "enumDescriptions": [
             "%configuration.windowMode.auto%",
             "%configuration.windowMode.framed%",
             "%configuration.windowMode.frameless%",
             "%configuration.windowMode.framelessTransparent%"
-        ],
-        "default": "frameless-transparent"
+          ],
+          "default": "frameless-transparent"
         },
         "vscode_vibrancy.windowControlsStyle": {
           "description": "%configuration.windowControlsStyle.description%",
