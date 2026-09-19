@@ -352,8 +352,20 @@ function styleHTML() {
   const HTML = [
     `
     <style>
+      :root {
+        --vibrancy-surface-background: rgba(${backgroundRGB.r},${backgroundRGB.g},${backgroundRGB.b},${opacity});
+        /*
+         * Keep the main workbench fully on the user-selected surface opacity,
+         * and add hierarchy only to chrome/header layers. This avoids alpha
+         * stacking over the editor, terminal and sidebars.
+         */
+        --vibrancy-zone-background: rgba(${backgroundRGB.r},${backgroundRGB.g},${backgroundRGB.b},${Math.min(1, opacity + 0.06)});
+        --vibrancy-header-background: rgba(${backgroundRGB.r},${backgroundRGB.g},${backgroundRGB.b},${Math.min(1, opacity + 0.10)});
+        --vibrancy-edge-background: rgba(${backgroundRGB.r},${backgroundRGB.g},${backgroundRGB.b},${Math.min(1, opacity + 0.20)});
+        --vibrancy-divider: rgba(255,255,255,0.10);
+      }
       html {
-        background: rgba(${backgroundRGB.r},${backgroundRGB.g},${backgroundRGB.b},${opacity}) !important;
+        background: var(--vibrancy-surface-background) !important;
       }
       ${themeCSS}
     </style>

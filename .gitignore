@@ -1,9 +1,21 @@
-node_modules
 .vscode
 test/screenshots
 .vsixmanifest
 firstload.lock
-*.vsix
 yarn.lock
-/build
+
+# Build / dependencies
+/build/
+/node_modules/
+
+# Generated packages
+*.vsix
+
+# Local diagnostics
+*.log
+*.patch
+*.zip
+
+# Native prebuilts
 native/prebuilt/*.node
+!native/prebuilt/vibrancy-x64.node

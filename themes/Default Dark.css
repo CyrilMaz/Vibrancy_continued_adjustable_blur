@@ -133,3 +133,98 @@ body {
 .monaco-workbench.style-override .monaco-pane-view .pane > .pane-header {
   background: transparent !important;
 }
+
+/*
+ * Keep the major workbench surfaces on one opacity source.
+ * The value comes from vscode_vibrancy.opacity via runtime-pre-esm/index.cjs.
+ * Child/editor/terminal backgrounds remain transparent so alpha does not stack.
+ */
+.monaco-workbench .part.titlebar,
+.monaco-workbench .part.activitybar,
+.monaco-workbench .part.sidebar,
+.monaco-workbench .part.editor,
+.monaco-workbench .part.panel,
+.monaco-workbench .part.auxiliarybar,
+.monaco-workbench .part.statusbar,
+.monaco-workbench.floating-panels .part.sidebar,
+.monaco-workbench.floating-panels .part.panel,
+.monaco-workbench.floating-panels .part.auxiliarybar {
+  background: var(--vibrancy-surface-background, transparent) !important;
+}
+
+
+
+/*
+ * Glass hierarchy without darkening the main content surfaces.
+ *
+ * The editor, terminal, left sidebar and auxiliary sidebar keep the exact
+ * surface opacity from vscode_vibrancy.opacity. Only outer chrome and local
+ * headers receive an extra tint, so the wallpaper stays detailed in the
+ * working area while the window keeps a clear visual frame.
+ */
+.monaco-workbench .part.titlebar,
+.monaco-workbench .part.activitybar,
+.monaco-workbench .part.statusbar {
+  background: var(--vibrancy-edge-background, transparent) !important;
+}
+
+.monaco-workbench .part.sidebar > .title,
+.monaco-workbench .part.auxiliarybar > .title,
+.monaco-workbench .part.panel > .composite.title,
+.monaco-workbench .part.panel > .title,
+.editor-group-container > .tabs,
+.editor-group-container > .tabs .tab.active,
+.editor-group-container > .tabs .monaco-breadcrumbs {
+  background: var(--vibrancy-header-background, transparent) !important;
+}
+
+/*
+ * Main work zones share one light veil: editor, terminal/panel and both sidebars
+ * must feel like the same glass surface. Outer chrome stays darker via
+ * --vibrancy-edge-background, so the center remains visually lighter.
+ */
+.monaco-workbench .part.editor,
+.monaco-workbench .part.sidebar,
+.monaco-workbench .part.auxiliarybar,
+.monaco-workbench .part.panel,
+.monaco-workbench.floating-panels .part.sidebar,
+.monaco-workbench.floating-panels .part.auxiliarybar,
+.monaco-workbench.floating-panels .part.panel {
+  background: var(--vibrancy-zone-background, transparent) !important;
+}
+
+/*
+ * Xterm has several nested surfaces that can repaint terminal.background. Keep
+ * those transparent so the panel's shared work-zone veil is the only background
+ * visible behind the terminal text.
+ */
+.monaco-workbench .part.panel .terminal-outer-container,
+.monaco-workbench .part.panel .terminal-wrapper,
+.monaco-workbench .part.panel .terminal-instance,
+.monaco-workbench .part.panel .xterm,
+.monaco-workbench .part.panel .xterm-screen,
+.monaco-workbench .part.panel .xterm-viewport,
+.monaco-workbench .part.panel .xterm-rows {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Fine separators give structure without adding another translucent layer. */
+.monaco-workbench .part.titlebar {
+  border-bottom: 1px solid var(--vibrancy-divider, rgba(255,255,255,0.10)) !important;
+}
+.monaco-workbench .part.activitybar {
+  border-right: 1px solid var(--vibrancy-divider, rgba(255,255,255,0.10)) !important;
+}
+.monaco-workbench .part.sidebar {
+  border-right: 1px solid var(--vibrancy-divider, rgba(255,255,255,0.10)) !important;
+}
+.monaco-workbench .part.auxiliarybar {
+  border-left: 1px solid var(--vibrancy-divider, rgba(255,255,255,0.10)) !important;
+}
+.monaco-workbench .part.panel {
+  border-top: 1px solid var(--vibrancy-divider, rgba(255,255,255,0.10)) !important;
+}
+.monaco-workbench .part.statusbar {
+  border-top: 1px solid var(--vibrancy-divider, rgba(255,255,255,0.10)) !important;
+}

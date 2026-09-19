@@ -254,13 +254,27 @@ namespace vibrancy_custom_blur
                 { 1.0f, 1.0f }
             );
 
-            state.effectBrush =
-                createBlurBrush(
-                    blurAmount
-                );
+            // HostBackdropBrush has a Windows-defined blur floor that is
+            // much stronger than the tiny 1-3 px blur we want. Instead of
+            // adding more Gaussian blur, blend the already-blurred backdrop
+            // over Electron's true transparent surface at a low opacity.
+            auto hostBackdrop =
+                g_compositor.CreateHostBackdropBrush();
 
             state.visual.Brush(
-                state.effectBrush
+                hostBackdrop
+            );
+
+            // Temporary calibration: treat blurRadius as blur *strength*.
+            // 1 -> 10%, 2 -> 20%, 3 -> 30%, ... 10+ -> 100%.
+            // If this produces the desired light-softening effect, we can
+            // calibrate the mapping and rename/internalize it afterwards.
+            float hostOpacity = blurAmount / 10.0f;
+            if (hostOpacity < 0.0f) hostOpacity = 0.0f;
+            if (hostOpacity > 1.0f) hostOpacity = 1.0f;
+
+            state.visual.Opacity(
+                hostOpacity
             );
 
             state.root.Children().InsertAtTop(
