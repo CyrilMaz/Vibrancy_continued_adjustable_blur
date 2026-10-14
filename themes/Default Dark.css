@@ -106,6 +106,22 @@ body {
   background-color: transparent !important;
 }
 
+/*
+ * Explorer's currently selected/open file gets an opaque highlight from
+ * VS Code's list selection styles, even when the sidebar itself is glass.
+ * Remove that fill only from the file tree (not search, problems, quick pick,
+ * or the settings lists). Keep a slim focus/selection marker for legibility.
+ */
+.monaco-workbench .part.sidebar .explorer-folders-view .monaco-list-row.selected,
+.monaco-workbench .part.sidebar .explorer-folders-view .monaco-list-row.focused {
+  background: transparent !important;
+}
+
+.monaco-workbench .part.sidebar .explorer-folders-view .monaco-list-row.selected {
+  box-shadow: inset 2px 0 0 var(--vscode-focusBorder, rgba(255,255,255,0.4)) !important;
+}
+
+
 .label-container .label {
   color: white !important;
 }
