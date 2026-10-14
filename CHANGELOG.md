@@ -1,3 +1,9 @@
+# Unreleased
+
+* Tabs: make the VS Code Modern UI editor tab strip and inactive tabs fully transparent by managing `editorGroupHeader.connectedTabsBackground` and `modernEditorTab.inactiveBackground`. Keep active and hovered tabs translucent using the configured Vibrancy opacity instead of the Modern UI theme's opaque fill.
+* Preserve the normal opaque editor/tab appearance in the "Only Subbar", "Tokyo Night Storm (Outer)", and "Dark (Exclude Tab Line)" themes by opting them out of the new colour keys.
+* Reload Vibrancy after updating so the new colours are applied and backed up for uninstall.
+
 # 1.1.93
 
 * Core:
