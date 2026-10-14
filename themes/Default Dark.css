@@ -107,18 +107,23 @@ body {
 }
 
 /*
- * Explorer's currently selected/open file gets an opaque highlight from
- * VS Code's list selection styles, even when the sidebar itself is glass.
- * Remove that fill only from the file tree (not search, problems, quick pick,
- * or the settings lists). Keep a slim focus/selection marker for legibility.
+ * Keep selected Explorer files easy to locate without VS Code's opaque list
+ * highlight. Tint only the file-tree row, not the entire sidebar or other
+ * lists; the alpha lets the desktop show through while editing elsewhere.
  */
-.monaco-workbench .part.sidebar .explorer-folders-view .monaco-list-row.selected,
-.monaco-workbench .part.sidebar .explorer-folders-view .monaco-list-row.focused {
-  background: transparent !important;
+.monaco-workbench .part.sidebar .explorer-folders-view .monaco-list-row.selected {
+  background: rgba(95, 115, 160, 0.32) !important;
+  box-shadow: inset 3px 0 0 var(--vscode-focusBorder, #007acc) !important;
 }
 
-.monaco-workbench .part.sidebar .explorer-folders-view .monaco-list-row.selected {
-  box-shadow: inset 2px 0 0 var(--vscode-focusBorder, rgba(255,255,255,0.4)) !important;
+/* Slightly stronger while the Explorer tree holds keyboard focus. */
+.monaco-workbench .part.sidebar .explorer-folders-view .monaco-list-row.selected.focused {
+  background: rgba(95, 115, 160, 0.42) !important;
+}
+
+/* Keyboard focus on another tree item stays subtle, never solid. */
+.monaco-workbench .part.sidebar .explorer-folders-view .monaco-list-row.focused:not(.selected) {
+  background: rgba(95, 115, 160, 0.16) !important;
 }
 
 
