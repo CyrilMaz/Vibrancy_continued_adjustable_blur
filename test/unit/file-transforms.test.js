@@ -534,14 +534,19 @@ describe('computeTransparentHex', () => {
 
 describe('ALL_VIBRANCY_BG_KEYS', () => {
   it('contains expected number of keys', () => {
-    // 8 transparent + 6 semi-transparent + 5 sticky scroll + 8 opaque = 27
-    expect(ALL_VIBRANCY_BG_KEYS).toHaveLength(27);
+    // 10 transparent + 9 semi-transparent + 5 sticky scroll + 8 opaque = 32
+    expect(ALL_VIBRANCY_BG_KEYS).toHaveLength(32);
   });
 
   it('includes key representative keys', () => {
     expect(ALL_VIBRANCY_BG_KEYS).toContain('editor.background');
     expect(ALL_VIBRANCY_BG_KEYS).toContain('sideBar.background');
     expect(ALL_VIBRANCY_BG_KEYS).toContain('editorPane.background');
+    expect(ALL_VIBRANCY_BG_KEYS).toContain('editorGroupHeader.connectedTabsBackground');
+    expect(TRANSPARENT_BG_KEYS).toContain('modernEditorTab.inactiveBackground');
+    expect(SEMITRANSPARENT_BG_KEYS).toContain('modernEditorTab.activeBackground');
+    expect(SEMITRANSPARENT_BG_KEYS).toContain('modernEditorTab.hoverBackground');
+    expect(SEMITRANSPARENT_BG_KEYS).toContain('modernEditorTab.activeHoverBackground');
     expect(ALL_VIBRANCY_BG_KEYS).toContain('editorStickyScroll.background');
   });
 
