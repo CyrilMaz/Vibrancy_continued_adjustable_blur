@@ -618,12 +618,17 @@ function resolveManagedBgKeys(themeColorCustomizations) {
 const TRANSPARENT_BG_KEYS = [
   "editorPane.background",
   "editorGroupHeader.tabsBackground",
+  // Modern UI connected tabs use a separate strip colour, which can otherwise
+  // stay opaque even when editorGroupHeader.tabsBackground is transparent.
+  "editorGroupHeader.connectedTabsBackground",
   "editorGroupHeader.noTabsBackground",
   "breadcrumb.background",
   "editorGutter.background",
   "panel.background",
   "tab.activeBackground",
   "tab.unfocusedActiveBackground",
+  // Inactive Modern UI pills should reveal the same backdrop as the tab strip.
+  "modernEditorTab.inactiveBackground",
 ];
 
 const SEMITRANSPARENT_BG_KEYS = [
@@ -633,6 +638,12 @@ const SEMITRANSPARENT_BG_KEYS = [
   "editor.background",
   "tab.inactiveBackground",
   "tab.unfocusedInactiveBackground",
+  // Retain a subtle active/hover highlight while letting the wallpaper show
+  // through Modern UI editor tabs. Avoid action-button backgrounds so the
+  // close/other tab actions keep their legibility.
+  "modernEditorTab.activeBackground",
+  "modernEditorTab.hoverBackground",
+  "modernEditorTab.activeHoverBackground",
 ];
 
 /**
