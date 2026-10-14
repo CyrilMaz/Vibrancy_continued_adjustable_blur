@@ -1,5 +1,6 @@
 # Unreleased
 
+* Explorer: make the selected/focused file row transparent in the Default Dark theme. Keep a thin accent marker instead of VS Code's opaque selection bar, scoped to the file tree so other lists stay unchanged.
 * Tabs: make the VS Code Modern UI editor tab strip and inactive tabs fully transparent by managing `editorGroupHeader.connectedTabsBackground` and `modernEditorTab.inactiveBackground`. Keep active and hovered tabs translucent using the configured Vibrancy opacity instead of the Modern UI theme's opaque fill.
 * Preserve the normal opaque editor/tab appearance in the "Only Subbar", "Tokyo Night Storm (Outer)", and "Dark (Exclude Tab Line)" themes by opting them out of the new colour keys.
 * Reload Vibrancy after updating so the new colours are applied and backed up for uninstall.
